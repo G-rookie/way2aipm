@@ -515,18 +515,62 @@ export async function route(req, res) {
   }
 }
 
-export async function startServer(port = PORT, host) {
-  await ensureContentDirs();
-  const server = createServer(route);
-  await new Promise((resolve) => {
-    server.listen(port, host, resolve);
+function listen(server, port, host) {
+  return new Promise((resolve, reject) => {
+    function cleanup() {
+      server.off("error", handleError);
+      server.off("listening", handleListening);
+    }
+
+    function handleError(error) {
+      cleanup();
+      reject(error);
+    }
+
+    function handleListening() {
+      cleanup();
+      resolve();
+    }
+
+    server.once("error", handleError);
+    server.once("listening", handleListening);
+    server.listen(port, host);
   });
-  return server;
+}
+
+function isPortUnavailable(error) {
+  return error.code === "EADDRINUSE" || error.code === "EACCES";
+}
+
+export async function startServer(port = PORT, host, options = {}) {
+  await ensureContentDirs();
+  const maxAttempts = options.maxAttempts ?? 10;
+  const shouldFallback = options.fallback ?? port !== 0;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const candidatePort = port === 0 ? 0 : port + attempt;
+    const server = createServer(route);
+
+    try {
+      await listen(server, candidatePort, host);
+      return server;
+    } catch (error) {
+      if (isPortUnavailable(error) && shouldFallback && attempt < maxAttempts - 1) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error(`No available port found from ${port} to ${port + maxAttempts - 1}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const server = await startServer(PORT);
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : PORT;
+  if (port !== PORT) {
+    console.log(`Port ${PORT} is already in use, switched to ${port}.`);
+  }
   console.log(`way2AIPM OS is running at http://localhost:${port}`);
 }
