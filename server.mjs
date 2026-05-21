@@ -542,35 +542,32 @@ function isPortUnavailable(error) {
   return error.code === "EADDRINUSE" || error.code === "EACCES";
 }
 
-export async function startServer(port = PORT, host, options = {}) {
+export async function startServer(port = PORT, host) {
   await ensureContentDirs();
-  const maxAttempts = options.maxAttempts ?? 10;
-  const shouldFallback = options.fallback ?? port !== 0;
+  const server = createServer(route);
+  await listen(server, port, host);
+  return server;
+}
 
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const candidatePort = port === 0 ? 0 : port + attempt;
-    const server = createServer(route);
-
-    try {
-      await listen(server, candidatePort, host);
-      return server;
-    } catch (error) {
-      if (isPortUnavailable(error) && shouldFallback && attempt < maxAttempts - 1) {
-        continue;
-      }
-      throw error;
-    }
+function logStartupError(error, port) {
+  if (isPortUnavailable(error)) {
+    console.error(`way2AIPM OS 启动失败：端口 ${port} 已被占用或当前用户无权监听该端口。`);
+    console.error("请先停止正在运行的旧服务，然后重新执行：node server.mjs");
+    console.error(`也可以临时指定其他端口启动：$env:PORT=4300; node server.mjs`);
+    return;
   }
 
-  throw new Error(`No available port found from ${port} to ${port + maxAttempts - 1}`);
+  console.error(`way2AIPM OS 启动失败：${error.message || error}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const server = await startServer(PORT);
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : PORT;
-  if (port !== PORT) {
-    console.log(`Port ${PORT} is already in use, switched to ${port}.`);
+  try {
+    const server = await startServer(PORT);
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : PORT;
+    console.log(`way2AIPM OS is running at http://localhost:${port}`);
+  } catch (error) {
+    logStartupError(error, PORT);
+    process.exitCode = 1;
   }
-  console.log(`way2AIPM OS is running at http://localhost:${port}`);
 }
