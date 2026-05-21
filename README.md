@@ -10,6 +10,7 @@
 - 单页 OS 工作台
 - 求职 Pipeline 看板
 - 岗位详情表单
+- 面试轮次创建与编辑
 - Markdown 文件存储
 
 暂不实现 AI 分析、登录、云同步、公开发布和删除能力。
@@ -47,7 +48,12 @@ node server.mjs
 content/opportunities/{id}.md
 ```
 
+面试轮次会保存到：
+
+```text
+content/interviews/{id}.md
+```
+
 每个文件使用 JSON front matter 保存结构化字段，正文保留 Markdown 阅读区。
 
 第一版只提供新增和更新，不提供删除接口。
-
