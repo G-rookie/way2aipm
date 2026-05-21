@@ -9,6 +9,7 @@ const PORT = Number(process.env.PORT || 4173);
 const PUBLIC_DIR = path.join(__dirname, "public");
 const CONTENT_DIR = path.join(__dirname, "content");
 const OPPORTUNITIES_DIR = path.join(CONTENT_DIR, "opportunities");
+const INTERVIEWS_DIR = path.join(CONTENT_DIR, "interviews");
 
 const STAGES = new Set([
   "collected",
@@ -24,6 +25,9 @@ const STAGES = new Set([
 
 const PRIORITIES = new Set(["low", "medium", "high"]);
 const RISK_LEVELS = new Set(["unknown", "low", "medium", "high"]);
+const ROUND_TYPES = new Set(["first", "second", "third", "hr", "final", "other"]);
+const INTERVIEW_STATUSES = new Set(["scheduled", "preparing", "completed", "reviewed", "cancelled"]);
+const PREPARATION_STATUSES = new Set(["not_started", "drafting", "ready", "needs_rework"]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -58,6 +62,7 @@ function methodNotAllowed(res) {
 
 async function ensureContentDirs() {
   await mkdir(OPPORTUNITIES_DIR, { recursive: true });
+  await mkdir(INTERVIEWS_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -69,25 +74,39 @@ function slugify(value) {
   return cleaned || "opportunity";
 }
 
-function createId(companyName, roleTitle) {
+function createOpportunityId(companyName, roleTitle) {
   const seed = slugify(`${companyName}-${roleTitle}`);
   const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
   const random = Math.random().toString(36).slice(2, 7);
   return `opp_${stamp}_${seed}_${random}`;
 }
 
-function sanitizeId(id) {
+function createInterviewId(companyName, roundName) {
+  const seed = slugify(`${companyName}-${roundName}`);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `int_${stamp}_${seed}_${random}`;
+}
+
+function sanitizeId(id, prefix) {
   const value = String(id || "");
-  if (!/^opp_[a-zA-Z0-9_\-\u4e00-\u9fa5]+$/.test(value)) {
+  const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
+  if (!pattern.test(value)) {
     return null;
   }
   return value;
 }
 
 function opportunityPath(id) {
-  const safeId = sanitizeId(id);
+  const safeId = sanitizeId(id, "opp");
   if (!safeId) return null;
   return path.join(OPPORTUNITIES_DIR, `${safeId}.md`);
+}
+
+function interviewPath(id) {
+  const safeId = sanitizeId(id, "int");
+  if (!safeId) return null;
+  return path.join(INTERVIEWS_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -109,7 +128,7 @@ function normalizeOpportunity(input, existing = {}) {
     : existing.riskLevel || "unknown";
 
   return {
-    id: existing.id || input.id || createId(companyName, roleTitle),
+    id: existing.id || input.id || createOpportunityId(companyName, roleTitle),
     type: "opportunity",
     companyName,
     roleTitle,
@@ -121,6 +140,60 @@ function normalizeOpportunity(input, existing = {}) {
     riskLevel,
     nextAction: String(input.nextAction ?? existing.nextAction ?? "").trim(),
     nextActionDueAt: String(input.nextActionDueAt ?? existing.nextActionDueAt ?? "").trim(),
+    notes: String(input.notes ?? existing.notes ?? ""),
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+function normalizeInterview(input, existing = {}, opportunity) {
+  const now = new Date().toISOString();
+  const opportunityId = String(
+    input.opportunityId ?? existing.opportunityId ?? opportunity?.id ?? "",
+  ).trim();
+  const companyName = String(
+    input.companyName ?? existing.companyName ?? opportunity?.companyName ?? "",
+  ).trim();
+  const roleTitle = String(input.roleTitle ?? existing.roleTitle ?? opportunity?.roleTitle ?? "").trim();
+  const roundName = String(input.roundName ?? existing.roundName ?? "").trim();
+
+  if (!opportunityId) {
+    throw new Error("opportunityId is required");
+  }
+  if (!companyName) {
+    throw new Error("companyName is required");
+  }
+  if (!roleTitle) {
+    throw new Error("roleTitle is required");
+  }
+  if (!roundName) {
+    throw new Error("roundName is required");
+  }
+
+  const roundType = ROUND_TYPES.has(input.roundType)
+    ? input.roundType
+    : existing.roundType || "first";
+  const status = INTERVIEW_STATUSES.has(input.status)
+    ? input.status
+    : existing.status || "scheduled";
+  const preparationStatus = PREPARATION_STATUSES.has(input.preparationStatus)
+    ? input.preparationStatus
+    : existing.preparationStatus || "not_started";
+
+  return {
+    id: existing.id || input.id || createInterviewId(companyName, roundName),
+    type: "interviewRound",
+    opportunityId,
+    companyName,
+    roleTitle,
+    roundName,
+    roundType,
+    scheduledAt: String(input.scheduledAt ?? existing.scheduledAt ?? "").trim(),
+    interviewer: String(input.interviewer ?? existing.interviewer ?? "").trim(),
+    location: String(input.location ?? existing.location ?? "").trim(),
+    status,
+    preparationStatus,
+    nextAction: String(input.nextAction ?? existing.nextAction ?? "").trim(),
     notes: String(input.notes ?? existing.notes ?? ""),
     createdAt: existing.createdAt || input.createdAt || now,
     updatedAt: now,
@@ -140,6 +213,16 @@ function opportunityToMarkdown(opportunity) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## JD 摘要\n\n${jdText}\n\n## 快速笔记\n\n${notes}\n`;
 }
 
+function interviewToMarkdown(interview) {
+  const frontMatter = JSON.stringify(interview, null, 2);
+  const title = markdownEscapeTitle(
+    `${interview.companyName} - ${interview.roleTitle} - ${interview.roundName}`,
+  );
+  const notes = interview.notes?.trim() || "";
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 面试备注\n\n${notes}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -150,6 +233,12 @@ function parseMarkdown(raw) {
 }
 
 async function readOpportunityFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readInterviewFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -187,12 +276,65 @@ async function listOpportunities() {
   return opportunities;
 }
 
+async function listInterviews(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(INTERVIEWS_DIR, { withFileTypes: true });
+  const interviews = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readInterviewFile(path.join(INTERVIEWS_DIR, entry.name));
+      if (item.type === "interviewRound") {
+        interviews.push(item);
+      }
+    } catch (error) {
+      interviews.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "interviewRound",
+        companyName: "读取失败",
+        roleTitle: entry.name,
+        roundName: "未知轮次",
+        roundType: "other",
+        status: "cancelled",
+        preparationStatus: "needs_rework",
+        nextAction: error.message,
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = filters.opportunityId
+    ? interviews.filter((interview) => interview.opportunityId === filters.opportunityId)
+    : interviews;
+
+  filtered.sort((a, b) => {
+    const scheduleOrder = String(a.scheduledAt || "").localeCompare(String(b.scheduledAt || ""));
+    if (scheduleOrder) return scheduleOrder;
+    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  });
+  return filtered;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
 
   try {
     return await readOpportunityFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function getInterview(id) {
+  const filePath = interviewPath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readInterviewFile(filePath);
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -207,6 +349,16 @@ async function saveOpportunity(opportunity) {
   }
   await writeFile(filePath, opportunityToMarkdown(opportunity), "utf8");
   return opportunity;
+}
+
+async function saveInterview(interview) {
+  await ensureContentDirs();
+  const filePath = interviewPath(interview.id);
+  if (!filePath) {
+    throw new Error("Invalid interview id");
+  }
+  await writeFile(filePath, interviewToMarkdown(interview), "utf8");
+  return interview;
 }
 
 async function readRequestBody(req) {
@@ -264,6 +416,53 @@ async function handleApi(req, res, url) {
     return methodNotAllowed(res);
   }
 
+  if (url.pathname === "/api/interviews") {
+    if (req.method === "GET") {
+      const opportunityId = url.searchParams.get("opportunityId") || "";
+      const interviews = await listInterviews({ opportunityId });
+      return sendJson(res, 200, { interviews });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const opportunity = await getOpportunity(body.opportunityId);
+      if (!opportunity) {
+        return sendJson(res, 400, { error: "Related opportunity not found" });
+      }
+      const interview = normalizeInterview(body, {}, opportunity);
+      await saveInterview(interview);
+      return sendJson(res, 201, { interview });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const interviewMatch = url.pathname.match(/^\/api\/interviews\/([^/]+)$/);
+  if (interviewMatch) {
+    const id = decodeURIComponent(interviewMatch[1]);
+
+    if (req.method === "GET") {
+      const interview = await getInterview(id);
+      if (!interview) return notFound(res);
+      return sendJson(res, 200, { interview });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getInterview(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      const opportunity = await getOpportunity(body.opportunityId || existing.opportunityId);
+      if (!opportunity) {
+        return sendJson(res, 400, { error: "Related opportunity not found" });
+      }
+      const interview = normalizeInterview({ ...body, id }, existing, opportunity);
+      await saveInterview(interview);
+      return sendJson(res, 200, { interview });
+    }
+
+    return methodNotAllowed(res);
+  }
+
   return notFound(res);
 }
 
@@ -316,18 +515,59 @@ export async function route(req, res) {
   }
 }
 
+function listen(server, port, host) {
+  return new Promise((resolve, reject) => {
+    function cleanup() {
+      server.off("error", handleError);
+      server.off("listening", handleListening);
+    }
+
+    function handleError(error) {
+      cleanup();
+      reject(error);
+    }
+
+    function handleListening() {
+      cleanup();
+      resolve();
+    }
+
+    server.once("error", handleError);
+    server.once("listening", handleListening);
+    server.listen(port, host);
+  });
+}
+
+function isPortUnavailable(error) {
+  return error.code === "EADDRINUSE" || error.code === "EACCES";
+}
+
 export async function startServer(port = PORT, host) {
   await ensureContentDirs();
   const server = createServer(route);
-  await new Promise((resolve) => {
-    server.listen(port, host, resolve);
-  });
+  await listen(server, port, host);
   return server;
 }
 
+function logStartupError(error, port) {
+  if (isPortUnavailable(error)) {
+    console.error(`way2AIPM OS 启动失败：端口 ${port} 已被占用或当前用户无权监听该端口。`);
+    console.error("请先停止正在运行的旧服务，然后重新执行：node server.mjs");
+    console.error(`也可以临时指定其他端口启动：$env:PORT=4300; node server.mjs`);
+    return;
+  }
+
+  console.error(`way2AIPM OS 启动失败：${error.message || error}`);
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const server = await startServer(PORT);
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : PORT;
-  console.log(`way2AIPM OS is running at http://localhost:${port}`);
+  try {
+    const server = await startServer(PORT);
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : PORT;
+    console.log(`way2AIPM OS is running at http://localhost:${port}`);
+  } catch (error) {
+    logStartupError(error, PORT);
+    process.exitCode = 1;
+  }
 }

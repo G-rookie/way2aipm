@@ -246,6 +246,10 @@ h1 {
   align-items: start;
 }
 
+.dashboard-workspace {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .panel {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -390,6 +394,26 @@ h1 {
   color: var(--blue);
 }
 
+.tag.prep-not_started {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.tag.prep-drafting {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.tag.prep-ready {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.tag.prep-needs_rework {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
 .next-action {
   margin: 10px 0 0;
   color: var(--muted);
@@ -461,6 +485,59 @@ textarea:focus {
 .stack {
   display: grid;
   gap: 12px;
+}
+
+.detail-divider {
+  height: 1px;
+  margin: 18px 0;
+  background: var(--line);
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-heading h3 {
+  margin: 0 0 5px;
+  font-size: 15px;
+}
+
+.section-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.interview-list {
+  display: grid;
+  gap: 8px;
+}
+
+.interview-item {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 11px;
+  background: var(--surface);
+  text-align: left;
+}
+
+.interview-item:hover,
+.interview-item.active {
+  border-color: var(--ink);
+  box-shadow: 0 8px 20px rgba(36, 31, 24, 0.07);
+}
+
+.compact-form textarea {
+  min-height: 88px;
 }
 
 .work-list {
@@ -539,6 +616,7 @@ textarea:focus {
 
 @media (max-width: 1120px) {
   .workspace,
+  .dashboard-workspace,
   .placeholder-grid {
     grid-template-columns: 1fr;
   }
@@ -586,4 +664,3 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 }
-

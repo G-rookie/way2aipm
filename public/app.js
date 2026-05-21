@@ -23,6 +23,30 @@ const RISK_LEVELS = [
   ["high", "高"],
 ];
 
+const ROUND_TYPES = [
+  ["first", "一面"],
+  ["second", "二面"],
+  ["third", "三面"],
+  ["hr", "HR 面"],
+  ["final", "终面"],
+  ["other", "其他"],
+];
+
+const INTERVIEW_STATUSES = [
+  ["scheduled", "已排期"],
+  ["preparing", "准备中"],
+  ["completed", "已完成"],
+  ["reviewed", "已复盘"],
+  ["cancelled", "已取消"],
+];
+
+const PREPARATION_STATUSES = [
+  ["not_started", "未开始"],
+  ["drafting", "整理中"],
+  ["ready", "已准备"],
+  ["needs_rework", "需要补强"],
+];
+
 const MODULES = [
   ["dashboard", "总控台", "00"],
   ["pipeline", "求职中台", "01"],
@@ -45,13 +69,32 @@ const EMPTY_OPPORTUNITY = {
   notes: "",
 };
 
+const EMPTY_INTERVIEW = {
+  opportunityId: "",
+  companyName: "",
+  roleTitle: "",
+  roundName: "",
+  roundType: "first",
+  scheduledAt: "",
+  interviewer: "",
+  location: "",
+  status: "scheduled",
+  preparationStatus: "not_started",
+  nextAction: "",
+  notes: "",
+};
+
 const state = {
   activeModule: "dashboard",
   opportunities: [],
+  interviews: [],
   selectedId: null,
+  selectedInterviewId: null,
   draft: null,
+  interviewDraft: null,
   loading: true,
   saving: false,
+  savingInterview: false,
 };
 
 const app = document.querySelector("#app");
@@ -79,6 +122,18 @@ function showToast(message) {
   showToast.timer = window.setTimeout(() => toast.classList.remove("show"), 2200);
 }
 
+function formatDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     headers: { "content-type": "application/json" },
@@ -91,14 +146,21 @@ async function api(path, options = {}) {
   return payload;
 }
 
-async function loadOpportunities() {
+async function loadData() {
   state.loading = true;
   render();
   try {
-    const payload = await api("/api/opportunities");
-    state.opportunities = payload.opportunities || [];
+    const [opportunitiesPayload, interviewsPayload] = await Promise.all([
+      api("/api/opportunities"),
+      api("/api/interviews"),
+    ]);
+    state.opportunities = opportunitiesPayload.opportunities || [];
+    state.interviews = interviewsPayload.interviews || [];
     if (!state.selectedId && state.opportunities.length) {
       state.selectedId = state.opportunities[0].id;
+    }
+    if (!state.selectedInterviewId && state.selectedId) {
+      state.selectedInterviewId = interviewsForOpportunity(state.selectedId)[0]?.id || null;
     }
   } catch (error) {
     showToast(error.message);
@@ -108,21 +170,75 @@ async function loadOpportunities() {
   }
 }
 
+const loadOpportunities = loadData;
+
 function selectedOpportunity() {
   if (state.draft) return state.draft;
   return state.opportunities.find((item) => item.id === state.selectedId) || null;
 }
 
+function interviewsForOpportunity(opportunityId) {
+  return state.interviews
+    .filter((interview) => interview.opportunityId === opportunityId)
+    .sort((a, b) => {
+      const scheduled = String(a.scheduledAt || "").localeCompare(String(b.scheduledAt || ""));
+      if (scheduled) return scheduled;
+      return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    });
+}
+
+function nextInterviewForOpportunity(opportunityId) {
+  const interviews = interviewsForOpportunity(opportunityId).filter(
+    (interview) => !["completed", "reviewed", "cancelled"].includes(interview.status),
+  );
+  return interviews[0] || null;
+}
+
+function selectedInterview() {
+  if (state.interviewDraft) return state.interviewDraft;
+  return state.interviews.find((item) => item.id === state.selectedInterviewId) || null;
+}
+
 function beginNewOpportunity() {
   state.activeModule = "pipeline";
   state.selectedId = null;
+  state.selectedInterviewId = null;
   state.draft = { ...EMPTY_OPPORTUNITY };
+  state.interviewDraft = null;
   render();
 }
 
 function selectOpportunity(id) {
   state.selectedId = id;
   state.draft = null;
+  state.interviewDraft = null;
+  const currentInterview = state.interviews.find((item) => item.id === state.selectedInterviewId);
+  if (currentInterview?.opportunityId !== id) {
+    state.selectedInterviewId = interviewsForOpportunity(id)[0]?.id || null;
+  }
+  render();
+}
+
+function beginNewInterview() {
+  const opportunity = selectedOpportunity();
+  if (!opportunity?.id) {
+    showToast("请先选择或保存一个岗位");
+    return;
+  }
+
+  state.interviewDraft = {
+    ...EMPTY_INTERVIEW,
+    opportunityId: opportunity.id,
+    companyName: opportunity.companyName,
+    roleTitle: opportunity.roleTitle,
+  };
+  state.selectedInterviewId = null;
+  render();
+}
+
+function selectInterview(id) {
+  state.selectedInterviewId = id;
+  state.interviewDraft = null;
   render();
 }
 
@@ -152,6 +268,19 @@ function metrics() {
   };
 }
 
+function interviewMetrics() {
+  const openInterviews = state.interviews.filter(
+    (item) => !["completed", "reviewed", "cancelled"].includes(item.status),
+  );
+  return {
+    upcoming: openInterviews.length,
+    preparing: state.interviews.filter((item) => item.status === "preparing").length,
+    needsPrep: state.interviews.filter((item) =>
+      ["not_started", "drafting", "needs_rework"].includes(item.preparationStatus),
+    ).length,
+  };
+}
+
 function renderShell(content) {
   app.innerHTML = `
     <div class="app-shell">
@@ -160,7 +289,7 @@ function renderShell(content) {
           <div class="brand-mark">A</div>
           <div>
             <h1 class="brand-title">way2AIPM OS</h1>
-            <p class="brand-subtitle">v0.1 Markdown 工作台</p>
+            <p class="brand-subtitle">v0.2 Markdown 工作台</p>
           </div>
         </div>
         <nav class="nav">
@@ -204,11 +333,12 @@ function renderTopbar(title, subtitle, eyebrow = "way2AIPM OS") {
 
 function renderMetricGrid() {
   const data = metrics();
+  const interviewData = interviewMetrics();
   return `
     <section class="grid metrics">
       <div class="metric"><div class="metric-label">全部机会</div><div class="metric-value">${data.total}</div></div>
       <div class="metric"><div class="metric-label">进行中</div><div class="metric-value">${data.active}</div></div>
-      <div class="metric"><div class="metric-label">待动作</div><div class="metric-value">${data.pending}</div></div>
+      <div class="metric"><div class="metric-label">待准备面试</div><div class="metric-value">${interviewData.needsPrep}</div></div>
       <div class="metric"><div class="metric-label">高风险</div><div class="metric-value">${data.highRisk}</div></div>
     </section>
   `;
@@ -216,8 +346,12 @@ function renderMetricGrid() {
 
 function renderOpportunityCard(opportunity) {
   const active = state.selectedId === opportunity.id;
+  const nextInterview = nextInterviewForOpportunity(opportunity.id);
   const nextAction = opportunity.nextAction
     ? `<p class="next-action">下一步：${escapeHtml(opportunity.nextAction)}</p>`
+    : "";
+  const interviewLine = nextInterview
+    ? `<p class="next-action">面试：${escapeHtml(nextInterview.roundName)}${nextInterview.scheduledAt ? ` · ${escapeHtml(formatDateTime(nextInterview.scheduledAt))}` : ""}</p>`
     : "";
   return `
     <button class="opp-card ${active ? "active" : ""}" data-select-id="${escapeHtml(opportunity.id)}" type="button">
@@ -229,6 +363,7 @@ function renderOpportunityCard(opportunity) {
         <span class="tag risk-${opportunity.riskLevel}">风险 ${optionLabel(RISK_LEVELS, opportunity.riskLevel)}</span>
       </div>
       ${nextAction}
+      ${interviewLine}
     </button>
   `;
 }
@@ -273,6 +408,117 @@ function renderSelect(name, options, selected) {
         .map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`)
         .join("")}
     </select>
+  `;
+}
+
+function renderInterviewList(opportunity) {
+  const interviews = interviewsForOpportunity(opportunity.id);
+
+  if (!interviews.length) {
+    return `<div class="empty">还没有面试轮次。收到邀约后，可以在这里创建一面、二面或 HR 面。</div>`;
+  }
+
+  return `
+    <div class="interview-list">
+      ${interviews
+        .map(
+          (interview) => `
+            <button class="interview-item ${state.selectedInterviewId === interview.id ? "active" : ""}" data-interview-id="${escapeHtml(interview.id)}" type="button">
+              <div>
+                <p class="work-item-title">${escapeHtml(interview.roundName)} · ${optionLabel(ROUND_TYPES, interview.roundType)}</p>
+                <p class="work-item-meta">
+                  ${interview.scheduledAt ? escapeHtml(formatDateTime(interview.scheduledAt)) : "未设置时间"}
+                  ${interview.interviewer ? ` · ${escapeHtml(interview.interviewer)}` : ""}
+                </p>
+              </div>
+              <div class="tag-row">
+                <span class="tag stage">${optionLabel(INTERVIEW_STATUSES, interview.status)}</span>
+                <span class="tag prep-${interview.preparationStatus}">${optionLabel(PREPARATION_STATUSES, interview.preparationStatus)}</span>
+              </div>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderInterviewForm(opportunity) {
+  const interview = selectedInterview();
+  const isNew = Boolean(state.interviewDraft);
+
+  if (!interview) {
+    return `<div class="empty">选择一个面试轮次进行编辑，或创建新的面试轮次。</div>`;
+  }
+
+  return `
+    <form id="interview-form" class="form-grid compact-form">
+      <div class="form-field">
+        <label>轮次名称</label>
+        <input name="roundName" value="${escapeHtml(interview.roundName)}" placeholder="一面 / 二面 / HR 面" required />
+      </div>
+      <div class="form-field">
+        <label>轮次类型</label>
+        ${renderSelect("roundType", ROUND_TYPES, interview.roundType)}
+      </div>
+      <div class="form-field">
+        <label>面试时间</label>
+        <input name="scheduledAt" type="datetime-local" value="${escapeHtml(interview.scheduledAt)}" />
+      </div>
+      <div class="form-field">
+        <label>面试官</label>
+        <input name="interviewer" value="${escapeHtml(interview.interviewer)}" placeholder="HR / 业务负责人 / 产品负责人" />
+      </div>
+      <div class="form-field">
+        <label>地点或链接</label>
+        <input name="location" value="${escapeHtml(interview.location)}" placeholder="线上会议链接 / 现场地址" />
+      </div>
+      <div class="form-field">
+        <label>面试状态</label>
+        ${renderSelect("status", INTERVIEW_STATUSES, interview.status)}
+      </div>
+      <div class="form-field">
+        <label>准备状态</label>
+        ${renderSelect("preparationStatus", PREPARATION_STATUSES, interview.preparationStatus)}
+      </div>
+      <div class="form-field">
+        <label>下一步动作</label>
+        <input name="nextAction" value="${escapeHtml(interview.nextAction)}" placeholder="例如：补公司调研、准备项目追问" />
+      </div>
+      <div class="form-field full">
+        <label>备注</label>
+        <textarea name="notes">${escapeHtml(interview.notes)}</textarea>
+      </div>
+      <input name="opportunityId" type="hidden" value="${escapeHtml(opportunity.id)}" />
+      <div class="form-field full">
+        <div class="actions">
+          ${isNew ? `<button class="btn" id="cancel-interview-btn" type="button">取消</button>` : ""}
+          <button class="btn primary" type="submit">${state.savingInterview ? "保存中..." : "保存面试轮次"}</button>
+        </div>
+        <div class="status-line">${interview.updatedAt ? `上次更新：${escapeHtml(interview.updatedAt)}` : ""}</div>
+      </div>
+    </form>
+  `;
+}
+
+function renderInterviewSection(opportunity, isNewOpportunity) {
+  if (isNewOpportunity) {
+    return "";
+  }
+
+  return `
+    <div class="detail-divider"></div>
+    <section class="stack">
+      <div class="section-heading">
+        <div>
+          <h3>面试轮次</h3>
+          <p>为该岗位创建一面、二面、HR 面等轮次，后续面试前作战室会基于这里展开。</p>
+        </div>
+        <button class="btn" id="new-interview-btn" type="button">新增轮次</button>
+      </div>
+      ${renderInterviewList(opportunity)}
+      ${renderInterviewForm(opportunity)}
+    </section>
   `;
 }
 
@@ -358,6 +604,7 @@ function renderDetailPanel() {
             <div class="status-line">${opportunity.updatedAt ? `上次更新：${escapeHtml(opportunity.updatedAt)}` : ""}</div>
           </div>
         </form>
+        ${renderInterviewSection(opportunity, isNew)}
       </div>
     </section>
   `;
@@ -367,14 +614,31 @@ function attachCommonEvents() {
   document.querySelector("#new-opp-btn")?.addEventListener("click", beginNewOpportunity);
   document.querySelector("#refresh-btn")?.addEventListener("click", loadOpportunities);
   document.querySelectorAll("[data-select-id]").forEach((button) => {
-    button.addEventListener("click", () => selectOpportunity(button.dataset.selectId));
+    button.addEventListener("click", () => {
+      selectOpportunity(button.dataset.selectId);
+      if (button.dataset.interviewId) {
+        state.activeModule = "pipeline";
+        state.selectedInterviewId = button.dataset.interviewId;
+        render();
+      }
+    });
   });
   document.querySelector("#cancel-new-btn")?.addEventListener("click", () => {
     state.draft = null;
     state.selectedId = state.opportunities[0]?.id || null;
     render();
   });
+  document.querySelector("#new-interview-btn")?.addEventListener("click", beginNewInterview);
+  document.querySelectorAll("[data-interview-id]").forEach((button) => {
+    button.addEventListener("click", () => selectInterview(button.dataset.interviewId));
+  });
+  document.querySelector("#cancel-interview-btn")?.addEventListener("click", () => {
+    state.interviewDraft = null;
+    state.selectedInterviewId = interviewsForOpportunity(state.selectedId)[0]?.id || null;
+    render();
+  });
   document.querySelector("#opportunity-form")?.addEventListener("submit", submitOpportunity);
+  document.querySelector("#interview-form")?.addEventListener("submit", submitInterview);
 }
 
 function formToOpportunity(form) {
@@ -390,6 +654,25 @@ function formToOpportunity(form) {
     riskLevel: formData.get("riskLevel"),
     nextAction: formData.get("nextAction"),
     nextActionDueAt: formData.get("nextActionDueAt"),
+    notes: formData.get("notes"),
+  };
+}
+
+function formToInterview(form) {
+  const formData = new FormData(form);
+  const opportunity = selectedOpportunity();
+  return {
+    opportunityId: formData.get("opportunityId") || opportunity?.id,
+    companyName: opportunity?.companyName,
+    roleTitle: opportunity?.roleTitle,
+    roundName: formData.get("roundName"),
+    roundType: formData.get("roundType"),
+    scheduledAt: formData.get("scheduledAt"),
+    interviewer: formData.get("interviewer"),
+    location: formData.get("location"),
+    status: formData.get("status"),
+    preparationStatus: formData.get("preparationStatus"),
+    nextAction: formData.get("nextAction"),
     notes: formData.get("notes"),
   };
 }
@@ -421,12 +704,53 @@ async function submitOpportunity(event) {
     state.selectedId = result.opportunity.id;
     state.draft = null;
     showToast("已保存到 Markdown");
-    const list = await api("/api/opportunities");
-    state.opportunities = list.opportunities || [];
+    const [opportunityList, interviewList] = await Promise.all([
+      api("/api/opportunities"),
+      api("/api/interviews"),
+    ]);
+    state.opportunities = opportunityList.opportunities || [];
+    state.interviews = interviewList.interviews || [];
   } catch (error) {
     showToast(error.message);
   } finally {
     state.saving = false;
+    render();
+  }
+}
+
+async function submitInterview(event) {
+  event.preventDefault();
+  if (state.savingInterview) return;
+
+  const form = event.currentTarget;
+  const payload = formToInterview(form);
+  if (state.interviewDraft) {
+    state.interviewDraft = { ...state.interviewDraft, ...payload };
+  } else {
+    state.interviews = state.interviews.map((item) =>
+      item.id === state.selectedInterviewId ? { ...item, ...payload } : item,
+    );
+  }
+  state.savingInterview = true;
+  render();
+
+  try {
+    const isNew = Boolean(state.interviewDraft);
+    const path = isNew ? "/api/interviews" : `/api/interviews/${encodeURIComponent(state.selectedInterviewId)}`;
+    const method = isNew ? "POST" : "PUT";
+    const result = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    state.selectedInterviewId = result.interview.id;
+    state.interviewDraft = null;
+    showToast("面试轮次已保存");
+    const list = await api("/api/interviews");
+    state.interviews = list.interviews || [];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingInterview = false;
     render();
   }
 }
@@ -439,15 +763,64 @@ function renderDashboard() {
   );
   const pending = state.opportunities.filter((item) => item.nextAction).slice(0, 6);
   const highRisk = state.opportunities.filter((item) => item.riskLevel === "high").slice(0, 4);
+  const pendingInterviews = state.interviews
+    .filter((item) => !["completed", "reviewed", "cancelled"].includes(item.status))
+    .slice(0, 6);
 
   return `
     ${topbar}
     ${renderMetricGrid()}
-    <div class="workspace">
+    <div class="workspace dashboard-workspace">
       <section class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">下一步动作</h2>
+            <h2 class="panel-title">待准备面试</h2>
+            <p class="panel-subtitle">从面试轮次中汇总未完成的准备事项。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="work-list">
+            ${
+              pendingInterviews.length
+                ? pendingInterviews
+                    .map(
+                      (item) => `
+                        <button class="work-item" data-select-id="${escapeHtml(item.opportunityId)}" data-interview-id="${escapeHtml(item.id)}" type="button">
+                          <div>
+                            <p class="work-item-title">${escapeHtml(item.companyName)} · ${escapeHtml(item.roleTitle)}</p>
+                            <p class="work-item-meta">${escapeHtml(item.roundName)} · ${optionLabel(ROUND_TYPES, item.roundType)}${item.scheduledAt ? ` · ${escapeHtml(formatDateTime(item.scheduledAt))}` : ""}</p>
+                          </div>
+                          <span class="tag prep-${item.preparationStatus}">${optionLabel(PREPARATION_STATUSES, item.preparationStatus)}</span>
+                        </button>
+                      `,
+                    )
+                    .join("")
+                : `<div class="empty">暂无待准备面试。收到邀约后，在岗位详情中创建面试轮次。</div>`
+            }
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">高风险机会</h2>
+            <p class="panel-subtitle">优先处理可能影响面试表现的岗位。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="work-list">
+            ${
+              highRisk.length
+                ? highRisk.map(renderOpportunityCard).join("")
+                : `<div class="empty">当前没有高风险岗位。</div>`
+            }
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">岗位下一步</h2>
             <p class="panel-subtitle">从 Pipeline 的 nextAction 字段汇总。</p>
           </div>
         </div>
@@ -468,24 +841,7 @@ function renderDashboard() {
                       `,
                     )
                     .join("")
-                : `<div class="empty">暂无待动作事项。</div>`
-            }
-          </div>
-        </div>
-      </section>
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">高风险机会</h2>
-            <p class="panel-subtitle">优先处理可能影响面试表现的岗位。</p>
-          </div>
-        </div>
-        <div class="panel-body">
-          <div class="work-list">
-            ${
-              highRisk.length
-                ? highRisk.map(renderOpportunityCard).join("")
-                : `<div class="empty">当前没有高风险岗位。</div>`
+                : `<div class="empty">暂无岗位下一步动作。</div>`
             }
           </div>
         </div>
