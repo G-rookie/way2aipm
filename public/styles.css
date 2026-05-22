@@ -511,6 +511,26 @@ h1 {
   color: var(--muted);
 }
 
+.tag.follow-unanswered {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.tag.follow-drafted {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.tag.follow-stable {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.tag.follow-needs_drill {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
 .next-action {
   margin: 10px 0 0;
   color: var(--muted);

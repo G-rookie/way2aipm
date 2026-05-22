@@ -15,6 +15,7 @@ const INTERVIEW_REVIEWS_DIR = path.join(CONTENT_DIR, "interview-reviews");
 const WEAKNESSES_DIR = path.join(CONTENT_DIR, "weaknesses");
 const TRAINING_TASKS_DIR = path.join(CONTENT_DIR, "training-tasks");
 const PROJECT_AMMOS_DIR = path.join(CONTENT_DIR, "project-ammos");
+const FOLLOW_UP_QUESTIONS_DIR = path.join(CONTENT_DIR, "follow-up-questions");
 
 const STAGES = new Set([
   "collected",
@@ -70,6 +71,17 @@ const PROJECT_TYPES = new Set([
   "other",
 ]);
 const PROJECT_AMMO_STATUSES = new Set(["draft", "usable", "needs_deepening", "archived"]);
+const FOLLOW_UP_QUESTION_TYPES = new Set([
+  "role_depth",
+  "decision_logic",
+  "metric_result",
+  "tradeoff",
+  "failure_reflection",
+  "ai_understanding",
+  "business_value",
+  "other",
+]);
+const FOLLOW_UP_QUESTION_STATUSES = new Set(["unanswered", "drafted", "stable", "needs_drill"]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -110,6 +122,7 @@ async function ensureContentDirs() {
   await mkdir(WEAKNESSES_DIR, { recursive: true });
   await mkdir(TRAINING_TASKS_DIR, { recursive: true });
   await mkdir(PROJECT_AMMOS_DIR, { recursive: true });
+  await mkdir(FOLLOW_UP_QUESTIONS_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -170,6 +183,13 @@ function createProjectAmmoId(projectName) {
   return `ammo_${stamp}_${seed}_${random}`;
 }
 
+function createFollowUpQuestionId(question) {
+  const seed = slugify(question);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `follow_${stamp}_${seed}_${random}`;
+}
+
 function sanitizeId(id, prefix) {
   const value = String(id || "");
   const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
@@ -219,6 +239,12 @@ function projectAmmoPath(id) {
   const safeId = sanitizeId(id, "ammo");
   if (!safeId) return null;
   return path.join(PROJECT_AMMOS_DIR, `${safeId}.md`);
+}
+
+function followUpQuestionPath(id) {
+  const safeId = sanitizeId(id, "follow");
+  if (!safeId) return null;
+  return path.join(FOLLOW_UP_QUESTIONS_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -551,6 +577,47 @@ function normalizeProjectAmmo(input, existing = {}) {
   };
 }
 
+function normalizeFollowUpQuestion(input, existing = {}, projectAmmo) {
+  const now = new Date().toISOString();
+  const projectAmmoId = String(input.projectAmmoId ?? existing.projectAmmoId ?? projectAmmo?.id ?? "").trim();
+  const question = String(input.question ?? existing.question ?? "").trim();
+
+  if (!projectAmmoId) {
+    throw new Error("projectAmmoId is required");
+  }
+  if (!question) {
+    throw new Error("question is required");
+  }
+
+  const questionType = FOLLOW_UP_QUESTION_TYPES.has(input.questionType)
+    ? input.questionType
+    : existing.questionType || "other";
+  const riskLevel = RISK_LEVELS.has(input.riskLevel) ? input.riskLevel : existing.riskLevel || "unknown";
+  const status = FOLLOW_UP_QUESTION_STATUSES.has(input.status)
+    ? input.status
+    : existing.status || "unanswered";
+
+  return {
+    id: existing.id || input.id || createFollowUpQuestionId(question),
+    type: "followUpQuestion",
+    projectAmmoId,
+    question,
+    questionType,
+    riskLevel,
+    answerDraft: String(input.answerDraft ?? existing.answerDraft ?? ""),
+    stableAnswer: String(input.stableAnswer ?? existing.stableAnswer ?? ""),
+    evidence: String(input.evidence ?? existing.evidence ?? ""),
+    status,
+    linkedWeaknessIds: unique([
+      ...asArray(existing.linkedWeaknessIds),
+      ...asArray(input.linkedWeaknessIds),
+      ...asArray(input.linkedWeaknessId),
+    ]),
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 function markdownEscapeTitle(value) {
   return String(value || "").replace(/\r?\n/g, " ").trim();
 }
@@ -611,6 +678,13 @@ function projectAmmoToMarkdown(ammo) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 背景\n\n${ammo.background}\n\n## 目标\n\n${ammo.goal}\n\n## 我的角色\n\n${ammo.role}\n\n## 关键动作\n\n${ammo.actions}\n\n## 结果与指标\n\n${ammo.result}\n\n${ammo.metrics}\n\n## 证据\n\n${ammo.evidence}\n\n## AI 相关性\n\n${ammo.aiRelevance}\n\n## 可证明能力\n\n${ammo.pmCompetencies}\n\n## 高风险追问\n\n${ammo.riskQuestions}\n`;
 }
 
+function followUpQuestionToMarkdown(question) {
+  const frontMatter = JSON.stringify(question, null, 2);
+  const title = markdownEscapeTitle(question.question || "项目追问");
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 回答草稿\n\n${question.answerDraft}\n\n## 稳定回答\n\n${question.stableAnswer}\n\n## 证据\n\n${question.evidence}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -657,6 +731,12 @@ async function readTrainingTaskFile(filePath) {
 }
 
 async function readProjectAmmoFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readFollowUpQuestionFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -930,6 +1010,51 @@ async function listProjectAmmos(filters = {}) {
   return filtered;
 }
 
+async function listFollowUpQuestions(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(FOLLOW_UP_QUESTIONS_DIR, { withFileTypes: true });
+  const questions = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readFollowUpQuestionFile(path.join(FOLLOW_UP_QUESTIONS_DIR, entry.name));
+      if (item.type === "followUpQuestion") {
+        questions.push(item);
+      }
+    } catch (error) {
+      questions.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "followUpQuestion",
+        projectAmmoId: "",
+        question: "读取失败",
+        questionType: "other",
+        riskLevel: "high",
+        status: "needs_drill",
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = questions.filter((question) => {
+    if (filters.projectAmmoId && question.projectAmmoId !== filters.projectAmmoId) return false;
+    if (filters.status && question.status !== filters.status) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const statusOrder = { needs_drill: 0, unanswered: 1, drafted: 2, stable: 3 };
+    const statusDiff = (statusOrder[a.status] ?? 4) - (statusOrder[b.status] ?? 4);
+    if (statusDiff) return statusDiff;
+    const riskOrder = { high: 0, medium: 1, low: 2, unknown: 3 };
+    const riskDiff = (riskOrder[a.riskLevel] ?? 4) - (riskOrder[b.riskLevel] ?? 4);
+    if (riskDiff) return riskDiff;
+    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  });
+  return filtered;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
@@ -1014,6 +1139,18 @@ async function getProjectAmmo(id) {
   }
 }
 
+async function getFollowUpQuestion(id) {
+  const filePath = followUpQuestionPath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readFollowUpQuestionFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function saveOpportunity(opportunity) {
   await ensureContentDirs();
   const filePath = opportunityPath(opportunity.id);
@@ -1082,6 +1219,16 @@ async function saveProjectAmmo(ammo) {
   }
   await writeFile(filePath, projectAmmoToMarkdown(ammo), "utf8");
   return ammo;
+}
+
+async function saveFollowUpQuestion(question) {
+  await ensureContentDirs();
+  const filePath = followUpQuestionPath(question.id);
+  if (!filePath) {
+    throw new Error("Invalid follow-up question id");
+  }
+  await writeFile(filePath, followUpQuestionToMarkdown(question), "utf8");
+  return question;
 }
 
 function briefStatusToPreparationStatus(status) {
@@ -1485,6 +1632,54 @@ async function handleApi(req, res, url) {
       const projectAmmo = normalizeProjectAmmo({ ...body, id }, existing);
       await saveProjectAmmo(projectAmmo);
       return sendJson(res, 200, { projectAmmo });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/follow-up-questions") {
+    if (req.method === "GET") {
+      const projectAmmoId = url.searchParams.get("projectAmmoId") || "";
+      const status = url.searchParams.get("status") || "";
+      const followUpQuestions = await listFollowUpQuestions({ projectAmmoId, status });
+      return sendJson(res, 200, { followUpQuestions });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const projectAmmo = await getProjectAmmo(body.projectAmmoId);
+      if (!projectAmmo) {
+        return sendJson(res, 400, { error: "Related project ammo not found" });
+      }
+      const followUpQuestion = normalizeFollowUpQuestion(body, {}, projectAmmo);
+      await saveFollowUpQuestion(followUpQuestion);
+      return sendJson(res, 201, { followUpQuestion });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const followUpQuestionMatch = url.pathname.match(/^\/api\/follow-up-questions\/([^/]+)$/);
+  if (followUpQuestionMatch) {
+    const id = decodeURIComponent(followUpQuestionMatch[1]);
+
+    if (req.method === "GET") {
+      const followUpQuestion = await getFollowUpQuestion(id);
+      if (!followUpQuestion) return notFound(res);
+      return sendJson(res, 200, { followUpQuestion });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getFollowUpQuestion(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      const projectAmmo = await getProjectAmmo(body.projectAmmoId || existing.projectAmmoId);
+      if (!projectAmmo) {
+        return sendJson(res, 400, { error: "Related project ammo not found" });
+      }
+      const followUpQuestion = normalizeFollowUpQuestion({ ...body, id }, existing, projectAmmo);
+      await saveFollowUpQuestion(followUpQuestion);
+      return sendJson(res, 200, { followUpQuestion });
     }
 
     return methodNotAllowed(res);

@@ -137,6 +137,24 @@ const PROJECT_AMMO_STATUSES = [
   ["archived", "已归档"],
 ];
 
+const FOLLOW_UP_QUESTION_TYPES = [
+  ["role_depth", "你具体做了什么"],
+  ["decision_logic", "为什么这么决策"],
+  ["metric_result", "结果和指标"],
+  ["tradeoff", "取舍判断"],
+  ["failure_reflection", "失败与复盘"],
+  ["ai_understanding", "AI 理解"],
+  ["business_value", "业务价值"],
+  ["other", "其他"],
+];
+
+const FOLLOW_UP_QUESTION_STATUSES = [
+  ["unanswered", "未回答"],
+  ["drafted", "已有草稿"],
+  ["stable", "表达稳定"],
+  ["needs_drill", "需要训练"],
+];
+
 const MODULES = [
   ["dashboard", "总控台", "00"],
   ["pipeline", "求职中台", "01"],
@@ -258,6 +276,18 @@ const EMPTY_PROJECT_AMMO = {
   status: "draft",
 };
 
+const EMPTY_FOLLOW_UP_QUESTION = {
+  projectAmmoId: "",
+  question: "",
+  questionType: "other",
+  riskLevel: "unknown",
+  answerDraft: "",
+  stableAnswer: "",
+  evidence: "",
+  status: "unanswered",
+  linkedWeaknessIds: [],
+};
+
 const state = {
   activeModule: "dashboard",
   opportunities: [],
@@ -267,6 +297,7 @@ const state = {
   weaknesses: [],
   trainingTasks: [],
   projectAmmos: [],
+  followUpQuestions: [],
   selectedId: null,
   selectedInterviewId: null,
   selectedBriefId: null,
@@ -274,6 +305,7 @@ const state = {
   selectedWeaknessId: null,
   selectedTrainingTaskId: null,
   selectedProjectAmmoId: null,
+  selectedFollowUpQuestionId: null,
   draft: null,
   interviewDraft: null,
   briefDraft: null,
@@ -281,6 +313,7 @@ const state = {
   weaknessDraft: null,
   trainingTaskDraft: null,
   projectAmmoDraft: null,
+  followUpQuestionDraft: null,
   loading: true,
   saving: false,
   savingInterview: false,
@@ -289,6 +322,7 @@ const state = {
   savingWeakness: false,
   savingTrainingTask: false,
   savingProjectAmmo: false,
+  savingFollowUpQuestion: false,
 };
 
 const app = document.querySelector("#app");
@@ -352,6 +386,7 @@ async function loadData() {
       weaknessesPayload,
       trainingTasksPayload,
       projectAmmosPayload,
+      followUpQuestionsPayload,
     ] = await Promise.all([
       api("/api/opportunities"),
       api("/api/interviews"),
@@ -360,6 +395,7 @@ async function loadData() {
       api("/api/weaknesses"),
       api("/api/training-tasks"),
       api("/api/project-ammos"),
+      api("/api/follow-up-questions"),
     ]);
     state.opportunities = opportunitiesPayload.opportunities || [];
     state.interviews = interviewsPayload.interviews || [];
@@ -368,6 +404,7 @@ async function loadData() {
     state.weaknesses = weaknessesPayload.weaknesses || [];
     state.trainingTasks = trainingTasksPayload.tasks || [];
     state.projectAmmos = projectAmmosPayload.projectAmmos || [];
+    state.followUpQuestions = followUpQuestionsPayload.followUpQuestions || [];
     if (!state.selectedId && state.opportunities.length) {
       state.selectedId = state.opportunities[0].id;
     }
@@ -388,6 +425,13 @@ async function loadData() {
     }
     if (!state.selectedProjectAmmoId && state.projectAmmos.length) {
       state.selectedProjectAmmoId = state.projectAmmos[0].id;
+    }
+    if (state.selectedProjectAmmoId) {
+      const questions = questionsForProjectAmmo(state.selectedProjectAmmoId);
+      const stillSelected = questions.some((item) => item.id === state.selectedFollowUpQuestionId);
+      state.selectedFollowUpQuestionId = stillSelected
+        ? state.selectedFollowUpQuestionId
+        : questions[0]?.id || null;
     }
   } catch (error) {
     showToast(error.message);
@@ -516,9 +560,26 @@ function selectedProjectAmmo() {
   return state.projectAmmos.find((item) => item.id === state.selectedProjectAmmoId) || null;
 }
 
+function questionsForProjectAmmo(projectAmmoId) {
+  return state.followUpQuestions.filter((item) => item.projectAmmoId === projectAmmoId);
+}
+
+function selectedFollowUpQuestion() {
+  if (state.followUpQuestionDraft) return state.followUpQuestionDraft;
+  return state.followUpQuestions.find((item) => item.id === state.selectedFollowUpQuestionId) || null;
+}
+
 function selectProjectAmmo(id) {
   state.selectedProjectAmmoId = id;
   state.projectAmmoDraft = null;
+  state.followUpQuestionDraft = null;
+  state.selectedFollowUpQuestionId = questionsForProjectAmmo(id)[0]?.id || null;
+  render();
+}
+
+function selectFollowUpQuestion(id) {
+  state.selectedFollowUpQuestionId = id;
+  state.followUpQuestionDraft = null;
   render();
 }
 
@@ -526,6 +587,19 @@ function beginNewProjectAmmo(seed = {}) {
   state.activeModule = "projectAmmo";
   state.projectAmmoDraft = { ...EMPTY_PROJECT_AMMO, ...seed };
   state.selectedProjectAmmoId = null;
+  state.followUpQuestionDraft = null;
+  state.selectedFollowUpQuestionId = null;
+  render();
+}
+
+function beginNewFollowUpQuestion() {
+  const ammo = selectedProjectAmmo();
+  if (!ammo?.id || state.projectAmmoDraft) {
+    showToast("请先保存项目弹药，再添加追问");
+    return;
+  }
+  state.followUpQuestionDraft = { ...EMPTY_FOLLOW_UP_QUESTION, projectAmmoId: ammo.id };
+  state.selectedFollowUpQuestionId = null;
   render();
 }
 
@@ -1146,6 +1220,12 @@ function attachCommonEvents() {
   document.querySelectorAll("[data-project-ammo-id]").forEach((button) => {
     button.addEventListener("click", () => selectProjectAmmo(button.dataset.projectAmmoId));
   });
+  document.querySelectorAll(".new-follow-up-question-btn").forEach((button) => {
+    button.addEventListener("click", beginNewFollowUpQuestion);
+  });
+  document.querySelectorAll("[data-follow-up-question-id]").forEach((button) => {
+    button.addEventListener("click", () => selectFollowUpQuestion(button.dataset.followUpQuestionId));
+  });
   document.querySelector("#cancel-interview-btn")?.addEventListener("click", () => {
     state.interviewDraft = null;
     state.selectedInterviewId = interviewsForOpportunity(state.selectedId)[0]?.id || null;
@@ -1174,6 +1254,17 @@ function attachCommonEvents() {
   document.querySelector("#cancel-project-ammo-btn")?.addEventListener("click", () => {
     state.projectAmmoDraft = null;
     state.selectedProjectAmmoId = state.projectAmmos[0]?.id || null;
+    state.followUpQuestionDraft = null;
+    state.selectedFollowUpQuestionId = state.selectedProjectAmmoId
+      ? questionsForProjectAmmo(state.selectedProjectAmmoId)[0]?.id || null
+      : null;
+    render();
+  });
+  document.querySelector("#cancel-follow-up-question-btn")?.addEventListener("click", () => {
+    state.followUpQuestionDraft = null;
+    state.selectedFollowUpQuestionId = state.selectedProjectAmmoId
+      ? questionsForProjectAmmo(state.selectedProjectAmmoId)[0]?.id || null
+      : null;
     render();
   });
   document.querySelector("#opportunity-form")?.addEventListener("submit", submitOpportunity);
@@ -1183,6 +1274,7 @@ function attachCommonEvents() {
   document.querySelector("#weakness-form")?.addEventListener("submit", submitWeakness);
   document.querySelector("#training-task-form")?.addEventListener("submit", submitTrainingTask);
   document.querySelector("#project-ammo-form")?.addEventListener("submit", submitProjectAmmo);
+  document.querySelector("#follow-up-question-form")?.addEventListener("submit", submitFollowUpQuestion);
 }
 
 function formToOpportunity(form) {
@@ -1617,6 +1709,61 @@ async function submitProjectAmmo(event) {
     showToast(error.message);
   } finally {
     state.savingProjectAmmo = false;
+    render();
+  }
+}
+
+function formToFollowUpQuestion(form) {
+  const formData = new FormData(form);
+  const existing = selectedFollowUpQuestion();
+  return {
+    projectAmmoId: formData.get("projectAmmoId") || state.selectedProjectAmmoId,
+    question: formData.get("question"),
+    questionType: formData.get("questionType"),
+    riskLevel: formData.get("riskLevel"),
+    answerDraft: formData.get("answerDraft"),
+    stableAnswer: formData.get("stableAnswer"),
+    evidence: formData.get("evidence"),
+    status: formData.get("status"),
+    linkedWeaknessIds: existing?.linkedWeaknessIds || [],
+  };
+}
+
+async function submitFollowUpQuestion(event) {
+  event.preventDefault();
+  if (state.savingFollowUpQuestion) return;
+
+  const form = event.currentTarget;
+  const payload = formToFollowUpQuestion(form);
+  if (state.followUpQuestionDraft) {
+    state.followUpQuestionDraft = { ...state.followUpQuestionDraft, ...payload };
+  } else {
+    state.followUpQuestions = state.followUpQuestions.map((item) =>
+      item.id === state.selectedFollowUpQuestionId ? { ...item, ...payload } : item,
+    );
+  }
+  state.savingFollowUpQuestion = true;
+  render();
+
+  try {
+    const isNew = Boolean(state.followUpQuestionDraft);
+    const path = isNew
+      ? "/api/follow-up-questions"
+      : `/api/follow-up-questions/${encodeURIComponent(state.selectedFollowUpQuestionId)}`;
+    const method = isNew ? "POST" : "PUT";
+    const result = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    state.selectedFollowUpQuestionId = result.followUpQuestion.id;
+    state.followUpQuestionDraft = null;
+    showToast("项目追问已保存");
+    const list = await api("/api/follow-up-questions");
+    state.followUpQuestions = list.followUpQuestions || [];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingFollowUpQuestion = false;
     render();
   }
 }
@@ -2308,6 +2455,7 @@ function renderProjectAmmoDetail(ammo) {
   }
 
   return `
+    <div class="stack">
     <section class="panel">
       <div class="panel-header">
         <div>
@@ -2350,9 +2498,9 @@ function renderProjectAmmoDetail(ammo) {
             <div class="linked-panel">
               <div>
                 <label>关联记录</label>
-                <p class="mini-meta">缺陷 ${(ammo.linkedWeaknessIds || []).length} 个 · 训练任务 ${(ammo.linkedTrainingTaskIds || []).length} 个</p>
+                <p class="mini-meta">缺陷 ${(ammo.linkedWeaknessIds || []).length} 个 · 训练任务 ${(ammo.linkedTrainingTaskIds || []).length} 个 · 追问 ${questionsForProjectAmmo(ammo.id).length} 个</p>
               </div>
-              <span class="mini-meta">项目追问将在下一切片补齐</span>
+              <button class="btn new-follow-up-question-btn" type="button">新增追问</button>
             </div>
           </div>
           <div class="form-field full">
@@ -2365,6 +2513,101 @@ function renderProjectAmmoDetail(ammo) {
         </form>
       </div>
     </section>
+    ${isNew ? "" : renderFollowUpQuestionSection(ammo)}
+    </div>
+  `;
+}
+
+function renderFollowUpQuestionSection(ammo) {
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">项目追问</h2>
+          <p class="panel-subtitle">把面试官可能深挖的问题沉淀成稳定回答。</p>
+        </div>
+        <button class="btn primary new-follow-up-question-btn" type="button">新增追问</button>
+      </div>
+      <div class="panel-body stack">
+        ${renderFollowUpQuestionList(ammo.id)}
+        ${renderFollowUpQuestionForm(ammo)}
+      </div>
+    </section>
+  `;
+}
+
+function renderFollowUpQuestionList(projectAmmoId) {
+  const questions = questionsForProjectAmmo(projectAmmoId);
+  if (!questions.length) {
+    return `<div class="empty">还没有项目追问。可以先记录一个“你具体做了什么”或“为什么这么决策”。</div>`;
+  }
+
+  return `
+    <div class="work-list">
+      ${questions
+        .map(
+          (question) => `
+            <button class="work-item ${question.id === state.selectedFollowUpQuestionId ? "active" : ""}" data-follow-up-question-id="${escapeHtml(question.id)}" type="button">
+              <div>
+                <p class="work-item-title">${escapeHtml(question.question)}</p>
+                <p class="work-item-meta">${optionLabel(FOLLOW_UP_QUESTION_TYPES, question.questionType)}</p>
+              </div>
+              <span class="tag follow-${question.status}">${optionLabel(FOLLOW_UP_QUESTION_STATUSES, question.status)}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderFollowUpQuestionForm(ammo) {
+  const question = selectedFollowUpQuestion();
+  const isNew = Boolean(state.followUpQuestionDraft);
+
+  if (!question || question.projectAmmoId !== ammo.id) {
+    return `<div class="empty">选择一条追问进行编辑，或新增一条高频追问。</div>`;
+  }
+
+  return `
+    <form id="follow-up-question-form" class="form-grid compact-form">
+      <input type="hidden" name="projectAmmoId" value="${escapeHtml(ammo.id)}" />
+      <div class="form-field full">
+        <label>追问问题</label>
+        <input name="question" value="${escapeHtml(question.question)}" placeholder="例如：这个项目里你最核心的产品判断是什么？" required />
+      </div>
+      <div class="form-field">
+        <label>问题类型</label>
+        ${renderSelect("questionType", FOLLOW_UP_QUESTION_TYPES, question.questionType)}
+      </div>
+      <div class="form-field">
+        <label>风险等级</label>
+        ${renderSelect("riskLevel", RISK_LEVELS, question.riskLevel)}
+      </div>
+      <div class="form-field">
+        <label>回答状态</label>
+        ${renderSelect("status", FOLLOW_UP_QUESTION_STATUSES, question.status)}
+      </div>
+      ${renderBriefField("answerDraft", "回答草稿", question.answerDraft, "先快速写下能讲出口的版本，不追求一次完美")}
+      ${renderBriefField("stableAnswer", "稳定回答", question.stableAnswer, "沉淀成结构清晰、可以复用的面试回答")}
+      ${renderBriefField("evidence", "证据", question.evidence, "支撑这个回答的指标、文档、决策过程或项目产物")}
+      <div class="form-field full">
+        <div class="linked-panel">
+          <div>
+            <label>关联缺陷</label>
+            <p class="mini-meta">${(question.linkedWeaknessIds || []).length ? `已关联 ${(question.linkedWeaknessIds || []).length} 个缺陷` : "后续可从缺陷或训练任务关联到追问"}</p>
+          </div>
+          <span class="tag risk-${question.riskLevel}">${optionLabel(RISK_LEVELS, question.riskLevel)}</span>
+        </div>
+      </div>
+      <div class="form-field full">
+        <div class="actions">
+          ${isNew ? `<button class="btn" id="cancel-follow-up-question-btn" type="button">取消</button>` : ""}
+          <button class="btn primary" type="submit">${state.savingFollowUpQuestion ? "保存中..." : "保存项目追问"}</button>
+        </div>
+        <div class="status-line">${question.updatedAt ? `上次更新：${escapeHtml(question.updatedAt)}` : "保存后会写入 content/follow-up-questions。"}</div>
+      </div>
+    </form>
   `;
 }
 
