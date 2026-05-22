@@ -196,6 +196,36 @@ const PORTFOLIO_READINESS = [
   ["ready", "可展示"],
 ];
 
+const AI_ANALYSIS_TYPES = [
+  ["jd_breakdown", "JD 拆解"],
+  ["company_research", "公司/业务调研"],
+  ["project_match", "项目匹配"],
+  ["follow_up_questions", "追问生成"],
+  ["answer_structure", "回答结构建议"],
+  ["portfolio_polish", "作品集文案打磨"],
+  ["weakness_repair", "缺陷修复建议"],
+  ["other", "其他"],
+];
+
+const AI_ANALYSIS_SOURCE_TYPES = [
+  ["opportunity", "岗位机会"],
+  ["project_ammo", "项目弹药"],
+  ["follow_up_question", "项目追问"],
+  ["interview_review", "面试复盘"],
+  ["weakness", "能力缺陷"],
+  ["training_task", "训练任务"],
+  ["portfolio_project", "作品集项目"],
+  ["freeform", "自由输入"],
+];
+
+const AI_ANALYSIS_STATUSES = [
+  ["draft", "草稿"],
+  ["prompt_ready", "提示词已就绪"],
+  ["ai_responded", "已粘贴 AI 输出"],
+  ["decided", "已人工决策"],
+  ["archived", "已归档"],
+];
+
 const MODULES = [
   ["dashboard", "总控台", "00"],
   ["pipeline", "求职中台", "01"],
@@ -204,6 +234,7 @@ const MODULES = [
   ["weakness", "缺陷与训练中心", "04"],
   ["projectAmmo", "项目弹药库", "05"],
   ["portfolio", "作品集产品线", "06"],
+  ["aiAnalysis", "AI 辅助分析", "07"],
 ];
 
 const EMPTY_OPPORTUNITY = {
@@ -375,6 +406,20 @@ const EMPTY_PORTFOLIO_PROJECT = {
   readiness: "draft",
 };
 
+const EMPTY_AI_ANALYSIS_NOTE = {
+  analysisType: "project_match",
+  sourceType: "freeform",
+  sourceId: "",
+  sourceTitle: "",
+  title: "",
+  contextSnapshot: "",
+  promptDraft: "",
+  aiResponse: "",
+  humanDecision: "",
+  nextAction: "",
+  status: "prompt_ready",
+};
+
 const state = {
   activeModule: "dashboard",
   opportunities: [],
@@ -389,6 +434,7 @@ const state = {
   portfolioProfile: { ...EMPTY_PORTFOLIO_PROFILE },
   portfolioProjects: [],
   portfolioPreviewMode: false,
+  aiAnalysisNotes: [],
   selectedId: null,
   selectedInterviewId: null,
   selectedBriefId: null,
@@ -399,6 +445,7 @@ const state = {
   selectedFollowUpQuestionId: null,
   selectedExpressionDrillId: null,
   selectedPortfolioProjectId: null,
+  selectedAiAnalysisNoteId: null,
   draft: null,
   interviewDraft: null,
   briefDraft: null,
@@ -409,6 +456,7 @@ const state = {
   followUpQuestionDraft: null,
   expressionDrillDraft: null,
   portfolioProjectDraft: null,
+  aiAnalysisNoteDraft: null,
   loading: true,
   saving: false,
   savingInterview: false,
@@ -421,6 +469,8 @@ const state = {
   savingExpressionDrill: false,
   savingPortfolioProfile: false,
   savingPortfolioProject: false,
+  savingAiAnalysisNote: false,
+  generatingAiContext: false,
 };
 
 const app = document.querySelector("#app");
@@ -488,6 +538,7 @@ async function loadData() {
       expressionDrillsPayload,
       portfolioProfilePayload,
       portfolioProjectsPayload,
+      aiAnalysisNotesPayload,
     ] = await Promise.all([
       api("/api/opportunities"),
       api("/api/interviews"),
@@ -500,6 +551,7 @@ async function loadData() {
       api("/api/expression-drills"),
       api("/api/portfolio-profile"),
       api("/api/portfolio-projects"),
+      api("/api/ai-analysis-notes"),
     ]);
     state.opportunities = opportunitiesPayload.opportunities || [];
     state.interviews = interviewsPayload.interviews || [];
@@ -512,6 +564,7 @@ async function loadData() {
     state.expressionDrills = expressionDrillsPayload.expressionDrills || [];
     state.portfolioProfile = portfolioProfilePayload.profile || { ...EMPTY_PORTFOLIO_PROFILE };
     state.portfolioProjects = portfolioProjectsPayload.portfolioProjects || [];
+    state.aiAnalysisNotes = aiAnalysisNotesPayload.aiAnalysisNotes || [];
     if (!state.selectedId && state.opportunities.length) {
       state.selectedId = state.opportunities[0].id;
     }
@@ -547,6 +600,9 @@ async function loadData() {
     }
     if (!state.selectedPortfolioProjectId && state.portfolioProjects.length) {
       state.selectedPortfolioProjectId = state.portfolioProjects[0].id;
+    }
+    if (!state.selectedAiAnalysisNoteId && state.aiAnalysisNotes.length) {
+      state.selectedAiAnalysisNoteId = state.aiAnalysisNotes[0].id;
     }
   } catch (error) {
     showToast(error.message);
@@ -711,6 +767,11 @@ function selectedPortfolioProject() {
   return state.portfolioProjects.find((item) => item.id === state.selectedPortfolioProjectId) || null;
 }
 
+function selectedAiAnalysisNote() {
+  if (state.aiAnalysisNoteDraft) return state.aiAnalysisNoteDraft;
+  return state.aiAnalysisNotes.find((item) => item.id === state.selectedAiAnalysisNoteId) || null;
+}
+
 function portfolioProjectsInPreview() {
   return state.portfolioProjects
     .filter((item) => item.visibility === "portfolio")
@@ -724,6 +785,15 @@ function portfolioMetrics() {
     inPreview: inPreview.length,
     ready: state.portfolioProjects.filter((item) => item.readiness === "ready").length,
     needsWork: state.portfolioProjects.filter((item) => item.readiness !== "ready").length,
+  };
+}
+
+function aiAnalysisMetrics() {
+  return {
+    total: state.aiAnalysisNotes.length,
+    promptReady: state.aiAnalysisNotes.filter((item) => item.status === "prompt_ready").length,
+    responded: state.aiAnalysisNotes.filter((item) => item.status === "ai_responded").length,
+    decided: state.aiAnalysisNotes.filter((item) => item.status === "decided").length,
   };
 }
 
@@ -742,6 +812,37 @@ function selectProjectAmmo(id) {
 function selectPortfolioProject(id) {
   state.selectedPortfolioProjectId = id;
   state.portfolioProjectDraft = null;
+  render();
+}
+
+function selectAiAnalysisNote(id) {
+  state.selectedAiAnalysisNoteId = id;
+  state.aiAnalysisNoteDraft = null;
+  render();
+}
+
+function openAiAnalysisNote(id) {
+  state.activeModule = "aiAnalysis";
+  selectAiAnalysisNote(id);
+}
+
+function sourceOptionsForType(sourceType) {
+  const maps = {
+    opportunity: state.opportunities.map((item) => [item.id, `${item.companyName} - ${item.roleTitle}`]),
+    project_ammo: state.projectAmmos.map((item) => [item.id, item.projectName]),
+    follow_up_question: state.followUpQuestions.map((item) => [item.id, item.question]),
+    interview_review: state.reviews.map((item) => [item.id, `${item.companyName} - ${item.roundName}复盘`]),
+    weakness: state.weaknesses.map((item) => [item.id, item.title]),
+    training_task: state.trainingTasks.map((item) => [item.id, item.title]),
+    portfolio_project: state.portfolioProjects.map((item) => [item.id, item.displayTitle]),
+  };
+  return maps[sourceType] || [];
+}
+
+async function beginNewAiAnalysisNote() {
+  state.activeModule = "aiAnalysis";
+  state.aiAnalysisNoteDraft = { ...EMPTY_AI_ANALYSIS_NOTE, title: "新的 AI 辅助分析" };
+  state.selectedAiAnalysisNoteId = null;
   render();
 }
 
@@ -1511,6 +1612,9 @@ function attachCommonEvents() {
   document.querySelectorAll("[data-dashboard-drill-id]").forEach((button) => {
     button.addEventListener("click", () => openExpressionDrill(button.dataset.dashboardDrillId));
   });
+  document.querySelectorAll("[data-dashboard-ai-note-id]").forEach((button) => {
+    button.addEventListener("click", () => openAiAnalysisNote(button.dataset.dashboardAiNoteId));
+  });
   document.querySelectorAll("[data-brief-project-id]").forEach((button) => {
     button.addEventListener("click", () => openProjectAmmo(button.dataset.briefProjectId));
   });
@@ -1527,6 +1631,28 @@ function attachCommonEvents() {
     state.portfolioPreviewMode = !state.portfolioPreviewMode;
     render();
   });
+  document.querySelector("#new-ai-analysis-btn")?.addEventListener("click", beginNewAiAnalysisNote);
+  document.querySelectorAll("[data-ai-analysis-note-id]").forEach((button) => {
+    button.addEventListener("click", () => selectAiAnalysisNote(button.dataset.aiAnalysisNoteId));
+  });
+  document.querySelector("#ai-analysis-form select[name='sourceType']")?.addEventListener("change", (event) => {
+    const form = event.target.closest("form");
+    const next = {
+      ...selectedAiAnalysisNote(),
+      ...formToAiAnalysisNote(form),
+      sourceType: event.target.value,
+      sourceId: "",
+    };
+    if (state.aiAnalysisNoteDraft) {
+      state.aiAnalysisNoteDraft = next;
+    } else {
+      state.aiAnalysisNotes = state.aiAnalysisNotes.map((item) =>
+        item.id === state.selectedAiAnalysisNoteId ? { ...item, ...next } : item,
+      );
+    }
+    render();
+  });
+  document.querySelector("#generate-ai-context-btn")?.addEventListener("click", generateAiAnalysisContext);
   document.querySelector("#cancel-new-btn")?.addEventListener("click", () => {
     state.draft = null;
     state.selectedId = state.opportunities[0]?.id || null;
@@ -1652,6 +1778,11 @@ function attachCommonEvents() {
     state.selectedPortfolioProjectId = state.portfolioProjects[0]?.id || null;
     render();
   });
+  document.querySelector("#cancel-ai-analysis-btn")?.addEventListener("click", () => {
+    state.aiAnalysisNoteDraft = null;
+    state.selectedAiAnalysisNoteId = state.aiAnalysisNotes[0]?.id || null;
+    render();
+  });
   document.querySelector("#opportunity-form")?.addEventListener("submit", submitOpportunity);
   document.querySelector("#interview-form")?.addEventListener("submit", submitInterview);
   document.querySelector("#brief-form")?.addEventListener("submit", submitBrief);
@@ -1663,6 +1794,7 @@ function attachCommonEvents() {
   document.querySelector("#expression-drill-form")?.addEventListener("submit", submitExpressionDrill);
   document.querySelector("#portfolio-profile-form")?.addEventListener("submit", submitPortfolioProfile);
   document.querySelector("#portfolio-project-form")?.addEventListener("submit", submitPortfolioProject);
+  document.querySelector("#ai-analysis-form")?.addEventListener("submit", submitAiAnalysisNote);
 }
 
 function formToOpportunity(form) {
@@ -2314,6 +2446,97 @@ async function submitPortfolioProject(event) {
   }
 }
 
+function formToAiAnalysisNote(form) {
+  const formData = new FormData(form);
+  return {
+    analysisType: formData.get("analysisType"),
+    sourceType: formData.get("sourceType"),
+    sourceId: formData.get("sourceId"),
+    sourceTitle: formData.get("sourceTitle"),
+    title: formData.get("title"),
+    contextSnapshot: formData.get("contextSnapshot"),
+    promptDraft: formData.get("promptDraft"),
+    aiResponse: formData.get("aiResponse"),
+    humanDecision: formData.get("humanDecision"),
+    nextAction: formData.get("nextAction"),
+    status: formData.get("status"),
+  };
+}
+
+async function generateAiAnalysisContext() {
+  const form = document.querySelector("#ai-analysis-form");
+  if (!form || state.generatingAiContext) return;
+
+  const payload = formToAiAnalysisNote(form);
+  state.generatingAiContext = true;
+  render();
+
+  try {
+    const result = await api("/api/ai-analysis-context", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    const next = {
+      ...selectedAiAnalysisNote(),
+      ...payload,
+      sourceTitle: result.sourceTitle,
+      contextSnapshot: result.contextSnapshot,
+      promptDraft: result.promptDraft,
+      title: payload.title || `${optionLabel(AI_ANALYSIS_TYPES, payload.analysisType)} - ${result.sourceTitle}`,
+      status: payload.status === "draft" ? "prompt_ready" : payload.status,
+    };
+    if (state.aiAnalysisNoteDraft) {
+      state.aiAnalysisNoteDraft = next;
+    } else {
+      state.aiAnalysisNotes = state.aiAnalysisNotes.map((item) =>
+        item.id === state.selectedAiAnalysisNoteId ? { ...item, ...next } : item,
+      );
+    }
+    showToast("上下文和提示词已生成");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.generatingAiContext = false;
+    render();
+  }
+}
+
+async function submitAiAnalysisNote(event) {
+  event.preventDefault();
+  if (state.savingAiAnalysisNote) return;
+
+  const payload = formToAiAnalysisNote(event.currentTarget);
+  if (state.aiAnalysisNoteDraft) {
+    state.aiAnalysisNoteDraft = { ...state.aiAnalysisNoteDraft, ...payload };
+  } else {
+    state.aiAnalysisNotes = state.aiAnalysisNotes.map((item) =>
+      item.id === state.selectedAiAnalysisNoteId ? { ...item, ...payload } : item,
+    );
+  }
+  state.savingAiAnalysisNote = true;
+  render();
+
+  try {
+    const isNew = Boolean(state.aiAnalysisNoteDraft);
+    const path = isNew ? "/api/ai-analysis-notes" : `/api/ai-analysis-notes/${encodeURIComponent(state.selectedAiAnalysisNoteId)}`;
+    const method = isNew ? "POST" : "PUT";
+    const result = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    state.selectedAiAnalysisNoteId = result.aiAnalysisNote.id;
+    state.aiAnalysisNoteDraft = null;
+    showToast("AI 分析记录已保存");
+    const list = await api("/api/ai-analysis-notes");
+    state.aiAnalysisNotes = list.aiAnalysisNotes || [];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingAiAnalysisNote = false;
+    render();
+  }
+}
+
 function renderDashboard() {
   const topbar = renderTopbar(
     "总控台",
@@ -2343,6 +2566,9 @@ function renderDashboard() {
     .slice(0, 6);
   const projectAmmo = projectAmmoMetrics();
   const portfolio = portfolioMetrics();
+  const pendingAiDecisions = state.aiAnalysisNotes
+    .filter((item) => item.status === "ai_responded")
+    .slice(0, 6);
 
   return `
     ${topbar}
@@ -2586,6 +2812,35 @@ function renderDashboard() {
               </div>
               <span class="tag portfolio-${state.portfolioProfile?.portfolioStatus || "draft"}">进入作品集</span>
             </button>
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">AI 待决策</h2>
+            <p class="panel-subtitle">已经粘贴 AI 输出，但还没有形成你的人工判断。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="work-list">
+            ${
+              pendingAiDecisions.length
+                ? pendingAiDecisions
+                    .map(
+                      (item) => `
+                        <button class="work-item" data-dashboard-ai-note-id="${escapeHtml(item.id)}" type="button">
+                          <div>
+                            <p class="work-item-title">${escapeHtml(item.title)}</p>
+                            <p class="work-item-meta">${optionLabel(AI_ANALYSIS_TYPES, item.analysisType)} · ${escapeHtml(item.sourceTitle || optionLabel(AI_ANALYSIS_SOURCE_TYPES, item.sourceType))}</p>
+                          </div>
+                          <span class="tag ai-${item.status}">${optionLabel(AI_ANALYSIS_STATUSES, item.status)}</span>
+                        </button>
+                      `,
+                    )
+                    .join("")
+                : `<div class="empty">暂无 AI 待决策记录。可以在 AI 辅助分析里生成提示词并粘贴输出。</div>`
+            }
           </div>
         </div>
       </section>
@@ -3817,6 +4072,163 @@ function renderPortfolioPreview() {
   `;
 }
 
+function renderAiAnalysis() {
+  const data = aiAnalysisMetrics();
+  const note = selectedAiAnalysisNote();
+
+  return `
+    ${renderTopbar("AI 辅助分析", "生成可审查的上下文快照和可复制提示词，粘贴 AI 输出后记录你的人工决策。", "07 AI Assist")}
+    <section class="grid metrics compact-metrics">
+      <div class="metric"><div class="metric-label">记录总数</div><div class="metric-value">${data.total}</div></div>
+      <div class="metric"><div class="metric-label">提示词就绪</div><div class="metric-value">${data.promptReady}</div></div>
+      <div class="metric"><div class="metric-label">待人工决策</div><div class="metric-value">${data.responded}</div></div>
+      <div class="metric"><div class="metric-label">已决策</div><div class="metric-value">${data.decided}</div></div>
+    </section>
+    <div class="workspace">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">分析记录</h2>
+            <p class="panel-subtitle">每条记录都会保存为独立 Markdown，方便后续复盘和迁移。</p>
+          </div>
+          <button class="btn primary" id="new-ai-analysis-btn" type="button">新增分析</button>
+        </div>
+        <div class="panel-body">${renderAiAnalysisList()}</div>
+      </section>
+      ${renderAiAnalysisDetail(note)}
+    </div>
+  `;
+}
+
+function renderAiAnalysisList() {
+  if (!state.aiAnalysisNotes.length) {
+    return `<div class="empty">还没有 AI 辅助分析记录。先新增一条，把岗位、项目或复盘内容整理成提示词。</div>`;
+  }
+
+  return `
+    <div class="work-list">
+      ${state.aiAnalysisNotes
+        .map(
+          (note) => `
+            <button class="work-item ${note.id === state.selectedAiAnalysisNoteId ? "active" : ""}" data-ai-analysis-note-id="${escapeHtml(note.id)}" type="button">
+              <div>
+                <p class="work-item-title">${escapeHtml(note.title)}</p>
+                <p class="work-item-meta">${optionLabel(AI_ANALYSIS_TYPES, note.analysisType)} · ${escapeHtml(note.sourceTitle || optionLabel(AI_ANALYSIS_SOURCE_TYPES, note.sourceType))}</p>
+              </div>
+              <span class="tag ai-${note.status}">${optionLabel(AI_ANALYSIS_STATUSES, note.status)}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderAiSourceField(note) {
+  const options = sourceOptionsForType(note.sourceType);
+  if (note.sourceType === "freeform") {
+    return `<input name="sourceId" value="" placeholder="自由输入不需要关联 ID" />`;
+  }
+
+  if (!options.length) {
+    return `<input name="sourceId" value="${escapeHtml(note.sourceId)}" placeholder="先在对应模块创建数据，或手动填写 ID" />`;
+  }
+
+  return `
+    <select name="sourceId">
+      <option value="">选择关联对象</option>
+      ${options
+        .map(([value, label]) => `<option value="${escapeHtml(value)}" ${value === note.sourceId ? "selected" : ""}>${escapeHtml(label)}</option>`)
+        .join("")}
+    </select>
+  `;
+}
+
+function renderAiAnalysisDetail(note) {
+  const isNew = Boolean(state.aiAnalysisNoteDraft);
+
+  if (!note) {
+    return `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">分析详情</h2>
+            <p class="panel-subtitle">选择一条记录，或新增第一条 AI 辅助分析。</p>
+          </div>
+        </div>
+        <div class="panel-body"><div class="empty">当前没有选中的分析记录。</div></div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">${isNew ? "新增 AI 辅助分析" : "AI 分析详情"}</h2>
+          <p class="panel-subtitle">先生成上下文和提示词，再把外部 AI 输出粘贴回来，最后写下你的判断。</p>
+        </div>
+      </div>
+      <div class="panel-body">
+        <form id="ai-analysis-form" class="form-grid compact-form ai-analysis-form">
+          <div class="form-field full">
+            <label>标题</label>
+            <input name="title" value="${escapeHtml(note.title)}" placeholder="例如：拆解某公司 AI PM JD" required />
+          </div>
+          <div class="form-field">
+            <label>分析类型</label>
+            ${renderSelect("analysisType", AI_ANALYSIS_TYPES, note.analysisType)}
+          </div>
+          <div class="form-field">
+            <label>材料来源</label>
+            ${renderSelect("sourceType", AI_ANALYSIS_SOURCE_TYPES, note.sourceType)}
+          </div>
+          <div class="form-field">
+            <label>关联对象</label>
+            ${renderAiSourceField(note)}
+          </div>
+          <div class="form-field">
+            <label>来源标题</label>
+            <input name="sourceTitle" value="${escapeHtml(note.sourceTitle)}" placeholder="可自动生成，也可手动覆盖" />
+          </div>
+          <div class="form-field">
+            <label>状态</label>
+            ${renderSelect("status", AI_ANALYSIS_STATUSES, note.status)}
+          </div>
+          <div class="form-field full">
+            <label>上下文快照</label>
+            <textarea name="contextSnapshot" class="tall-textarea" placeholder="点击生成后，会汇总关联对象的关键材料。">${escapeHtml(note.contextSnapshot)}</textarea>
+          </div>
+          <div class="form-field full">
+            <label>可复制提示词</label>
+            <textarea name="promptDraft" class="tall-textarea" placeholder="这里是准备粘贴给 AI 的提示词。">${escapeHtml(note.promptDraft)}</textarea>
+          </div>
+          <div class="form-field full">
+            <label>AI 输出</label>
+            <textarea name="aiResponse" class="tall-textarea" placeholder="把外部 AI 的回答粘贴到这里。">${escapeHtml(note.aiResponse)}</textarea>
+          </div>
+          <div class="form-field full">
+            <label>人工决策</label>
+            <textarea name="humanDecision" placeholder="记录你采纳什么、否决什么、下一步怎么做。">${escapeHtml(note.humanDecision)}</textarea>
+          </div>
+          <div class="form-field full">
+            <label>下一步动作</label>
+            <input name="nextAction" value="${escapeHtml(note.nextAction)}" placeholder="例如：补充项目案例、改写回答、更新 Brief" />
+          </div>
+          <div class="form-field full">
+            <div class="actions">
+              ${isNew ? `<button class="btn" id="cancel-ai-analysis-btn" type="button">取消</button>` : ""}
+              <button class="btn" id="generate-ai-context-btn" type="button">${state.generatingAiContext ? "生成中..." : "生成上下文与提示词"}</button>
+              <button class="btn primary" type="submit">${state.savingAiAnalysisNote ? "保存中..." : "保存分析记录"}</button>
+            </div>
+            <div class="status-line">${note.updatedAt ? `上次更新：${escapeHtml(note.updatedAt)}` : "保存后会写入 content/ai-analysis-notes。"}</div>
+          </div>
+        </form>
+      </div>
+    </section>
+  `;
+}
+
 function render() {
   let content;
   if (state.activeModule === "dashboard") content = renderDashboard();
@@ -3826,6 +4238,7 @@ function render() {
   if (state.activeModule === "weakness") content = renderWeakness();
   if (state.activeModule === "projectAmmo") content = renderProjectAmmo();
   if (state.activeModule === "portfolio") content = renderPortfolio();
+  if (state.activeModule === "aiAnalysis") content = renderAiAnalysis();
 
   renderShell(content);
   attachCommonEvents();

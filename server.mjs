@@ -19,6 +19,7 @@ const FOLLOW_UP_QUESTIONS_DIR = path.join(CONTENT_DIR, "follow-up-questions");
 const EXPRESSION_DRILLS_DIR = path.join(CONTENT_DIR, "expression-drills");
 const PORTFOLIO_DIR = path.join(CONTENT_DIR, "portfolio");
 const PORTFOLIO_PROJECTS_DIR = path.join(CONTENT_DIR, "portfolio-projects");
+const AI_ANALYSIS_NOTES_DIR = path.join(CONTENT_DIR, "ai-analysis-notes");
 const PORTFOLIO_PROFILE_ID = "portfolio_profile";
 
 const STAGES = new Set([
@@ -97,6 +98,27 @@ const EXPRESSION_DRILL_STATUSES = new Set(["todo", "practicing", "reviewing", "s
 const PORTFOLIO_STATUSES = new Set(["draft", "reviewing", "ready", "published_ready"]);
 const PORTFOLIO_VISIBILITIES = new Set(["private", "portfolio", "hidden"]);
 const PORTFOLIO_READINESS = new Set(["draft", "needs_sanitizing", "needs_evidence", "ready"]);
+const AI_ANALYSIS_TYPES = new Set([
+  "jd_breakdown",
+  "company_research",
+  "project_match",
+  "follow_up_questions",
+  "answer_structure",
+  "portfolio_polish",
+  "weakness_repair",
+  "other",
+]);
+const AI_ANALYSIS_SOURCE_TYPES = new Set([
+  "opportunity",
+  "project_ammo",
+  "follow_up_question",
+  "interview_review",
+  "weakness",
+  "training_task",
+  "portfolio_project",
+  "freeform",
+]);
+const AI_ANALYSIS_STATUSES = new Set(["draft", "prompt_ready", "ai_responded", "decided", "archived"]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -141,6 +163,7 @@ async function ensureContentDirs() {
   await mkdir(EXPRESSION_DRILLS_DIR, { recursive: true });
   await mkdir(PORTFOLIO_DIR, { recursive: true });
   await mkdir(PORTFOLIO_PROJECTS_DIR, { recursive: true });
+  await mkdir(AI_ANALYSIS_NOTES_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -222,6 +245,13 @@ function createPortfolioProjectId(title) {
   return `pfproj_${stamp}_${seed}_${random}`;
 }
 
+function createAiAnalysisNoteId(title) {
+  const seed = slugify(title);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `ainote_${stamp}_${seed}_${random}`;
+}
+
 function sanitizeId(id, prefix) {
   const value = String(id || "");
   const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
@@ -293,6 +323,12 @@ function portfolioProjectPath(id) {
   const safeId = sanitizeId(id, "pfproj");
   if (!safeId) return null;
   return path.join(PORTFOLIO_PROJECTS_DIR, `${safeId}.md`);
+}
+
+function aiAnalysisNotePath(id) {
+  const safeId = sanitizeId(id, "ainote");
+  if (!safeId) return null;
+  return path.join(AI_ANALYSIS_NOTES_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -774,6 +810,42 @@ function normalizePortfolioProject(input, existing = {}, projectAmmo) {
   };
 }
 
+function normalizeAiAnalysisNote(input, existing = {}) {
+  const now = new Date().toISOString();
+  const analysisType = AI_ANALYSIS_TYPES.has(input.analysisType)
+    ? input.analysisType
+    : existing.analysisType || "other";
+  const sourceType = AI_ANALYSIS_SOURCE_TYPES.has(input.sourceType)
+    ? input.sourceType
+    : existing.sourceType || "freeform";
+  const sourceId = String(input.sourceId ?? existing.sourceId ?? "").trim();
+  const sourceTitle = String(input.sourceTitle ?? existing.sourceTitle ?? "").trim();
+  const title = String(input.title ?? existing.title ?? sourceTitle ?? "").trim();
+  const status = AI_ANALYSIS_STATUSES.has(input.status) ? input.status : existing.status || "prompt_ready";
+
+  if (!title) {
+    throw new Error("title is required");
+  }
+
+  return {
+    id: existing.id || input.id || createAiAnalysisNoteId(title),
+    type: "aiAnalysisNote",
+    analysisType,
+    sourceType,
+    sourceId,
+    sourceTitle,
+    title,
+    contextSnapshot: String(input.contextSnapshot ?? existing.contextSnapshot ?? ""),
+    promptDraft: String(input.promptDraft ?? existing.promptDraft ?? ""),
+    aiResponse: String(input.aiResponse ?? existing.aiResponse ?? ""),
+    humanDecision: String(input.humanDecision ?? existing.humanDecision ?? ""),
+    nextAction: String(input.nextAction ?? existing.nextAction ?? "").trim(),
+    status,
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 function markdownEscapeTitle(value) {
   return String(value || "").replace(/\r?\n/g, " ").trim();
 }
@@ -861,6 +933,13 @@ function portfolioProjectToMarkdown(project) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 项目摘要\n\n${project.summary}\n\n## 问题与场景\n\n${project.problem}\n\n## 解决方案\n\n${project.solution}\n\n## 结果与影响\n\n${project.impact}\n\n## 指标\n\n${project.metrics}\n\n## 能力标签\n\n${project.skills}\n\n## 证据与风险\n\n${project.evidence}\n\n${project.privacyNote}\n`;
 }
 
+function aiAnalysisNoteToMarkdown(note) {
+  const frontMatter = JSON.stringify(note, null, 2);
+  const title = markdownEscapeTitle(note.title);
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 上下文快照\n\n${note.contextSnapshot}\n\n## 提示词草稿\n\n${note.promptDraft}\n\n## AI 输出\n\n${note.aiResponse}\n\n## 人工决策\n\n${note.humanDecision}\n\n## 下一步动作\n\n${note.nextAction}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -931,6 +1010,12 @@ async function readPortfolioProfileFile(filePath) {
 }
 
 async function readPortfolioProjectFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readAiAnalysisNoteFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -1347,6 +1432,48 @@ async function listPortfolioProjects(filters = {}) {
   return filtered;
 }
 
+async function listAiAnalysisNotes(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(AI_ANALYSIS_NOTES_DIR, { withFileTypes: true });
+  const notes = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readAiAnalysisNoteFile(path.join(AI_ANALYSIS_NOTES_DIR, entry.name));
+      if (item.type === "aiAnalysisNote") {
+        notes.push(item);
+      }
+    } catch (error) {
+      notes.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "aiAnalysisNote",
+        title: "读取失败",
+        analysisType: "other",
+        sourceType: "freeform",
+        status: "draft",
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = notes.filter((note) => {
+    if (filters.analysisType && note.analysisType !== filters.analysisType) return false;
+    if (filters.sourceType && note.sourceType !== filters.sourceType) return false;
+    if (filters.status && note.status !== filters.status) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const statusOrder = { ai_responded: 0, prompt_ready: 1, draft: 2, decided: 3, archived: 4 };
+    const statusDiff = (statusOrder[a.status] ?? 5) - (statusOrder[b.status] ?? 5);
+    if (statusDiff) return statusDiff;
+    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  });
+  return filtered;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
@@ -1467,6 +1594,18 @@ async function getPortfolioProject(id) {
   }
 }
 
+async function getAiAnalysisNote(id) {
+  const filePath = aiAnalysisNotePath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readAiAnalysisNoteFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function saveOpportunity(opportunity) {
   await ensureContentDirs();
   const filePath = opportunityPath(opportunity.id);
@@ -1573,6 +1712,16 @@ async function savePortfolioProject(project) {
   return project;
 }
 
+async function saveAiAnalysisNote(note) {
+  await ensureContentDirs();
+  const filePath = aiAnalysisNotePath(note.id);
+  if (!filePath) {
+    throw new Error("Invalid AI analysis note id");
+  }
+  await writeFile(filePath, aiAnalysisNoteToMarkdown(note), "utf8");
+  return note;
+}
+
 function briefStatusToPreparationStatus(status) {
   if (status === "ready") return "ready";
   if (status === "needs_rework") return "needs_rework";
@@ -1676,6 +1825,198 @@ async function portfolioPreviewData() {
       needsWork: projects.length - readyCount,
       portfolioStatus: profile.portfolioStatus,
     },
+  };
+}
+
+function compactBlock(title, entries) {
+  const lines = entries
+    .filter(([, value]) => String(value ?? "").trim())
+    .map(([label, value]) => `- ${label}: ${String(value).trim()}`);
+  return lines.length ? `## ${title}\n\n${lines.join("\n")}` : `## ${title}\n\n暂无内容`;
+}
+
+function analysisTypeLabel(type) {
+  const labels = {
+    jd_breakdown: "JD 拆解",
+    company_research: "公司/业务调研",
+    project_match: "项目匹配",
+    follow_up_questions: "追问生成",
+    answer_structure: "回答结构建议",
+    portfolio_polish: "作品集文案打磨",
+    weakness_repair: "缺陷修复建议",
+    other: "其他分析",
+  };
+  return labels[type] || labels.other;
+}
+
+async function sourceContext(sourceType, sourceId, freeformContext = "") {
+  if (sourceType === "freeform") {
+    return {
+      sourceTitle: "自由输入",
+      contextSnapshot: String(freeformContext || "").trim() || "暂无自由输入上下文",
+    };
+  }
+
+  if (sourceType === "opportunity") {
+    const item = await getOpportunity(sourceId);
+    if (!item) throw new Error("Related opportunity not found");
+    return {
+      sourceTitle: `${item.companyName} - ${item.roleTitle}`,
+      contextSnapshot: compactBlock("岗位机会", [
+        ["公司", item.companyName],
+        ["岗位", item.roleTitle],
+        ["阶段", item.stage],
+        ["风险", item.riskLevel],
+        ["下一步", item.nextAction],
+        ["JD", item.jdText],
+        ["笔记", item.notes],
+      ]),
+    };
+  }
+
+  if (sourceType === "project_ammo") {
+    const item = await getProjectAmmo(sourceId);
+    if (!item) throw new Error("Related project ammo not found");
+    return {
+      sourceTitle: item.projectName,
+      contextSnapshot: compactBlock("项目弹药", [
+        ["项目", item.projectName],
+        ["角色", item.role],
+        ["周期", item.period],
+        ["背景", item.background],
+        ["目标", item.goal],
+        ["关键动作", item.actions],
+        ["结果", item.result],
+        ["指标", item.metrics],
+        ["AI 相关性", item.aiRelevance],
+        ["可证明能力", item.pmCompetencies],
+        ["高风险追问", item.riskQuestions],
+      ]),
+    };
+  }
+
+  if (sourceType === "follow_up_question") {
+    const item = await getFollowUpQuestion(sourceId);
+    if (!item) throw new Error("Related follow-up question not found");
+    return {
+      sourceTitle: item.question,
+      contextSnapshot: compactBlock("项目追问", [
+        ["问题", item.question],
+        ["类型", item.questionType],
+        ["风险", item.riskLevel],
+        ["回答草稿", item.answerDraft],
+        ["稳定回答", item.stableAnswer],
+        ["证据", item.evidence],
+      ]),
+    };
+  }
+
+  if (sourceType === "interview_review") {
+    const item = await getReview(sourceId);
+    if (!item) throw new Error("Related interview review not found");
+    return {
+      sourceTitle: `${item.companyName} - ${item.roundName}复盘`,
+      contextSnapshot: compactBlock("面试复盘", [
+        ["公司", item.companyName],
+        ["岗位", item.roleTitle],
+        ["轮次", item.roundName],
+        ["实际问题", item.actualQuestions],
+        ["强回答", item.strongAnswers],
+        ["弱回答", item.weakAnswers],
+        ["挂点分析", item.failurePoints],
+        ["总结", item.summary],
+      ]),
+    };
+  }
+
+  if (sourceType === "weakness") {
+    const item = await getWeakness(sourceId);
+    if (!item) throw new Error("Related weakness not found");
+    return {
+      sourceTitle: item.title,
+      contextSnapshot: compactBlock("能力缺陷", [
+        ["标题", item.title],
+        ["类型", item.category],
+        ["严重程度", item.severity],
+        ["证据", item.evidence],
+        ["描述", item.description],
+        ["状态", item.status],
+      ]),
+    };
+  }
+
+  if (sourceType === "training_task") {
+    const item = await getTrainingTask(sourceId);
+    if (!item) throw new Error("Related training task not found");
+    return {
+      sourceTitle: item.title,
+      contextSnapshot: compactBlock("训练任务", [
+        ["标题", item.title],
+        ["类型", item.taskType],
+        ["目标能力", item.targetAbility],
+        ["练习产物", item.practiceOutput],
+        ["验收标准", item.acceptanceCriteria],
+        ["验证记录", item.validationNote],
+      ]),
+    };
+  }
+
+  if (sourceType === "portfolio_project") {
+    const item = await getPortfolioProject(sourceId);
+    if (!item) throw new Error("Related portfolio project not found");
+    return {
+      sourceTitle: item.displayTitle,
+      contextSnapshot: compactBlock("作品集项目", [
+        ["公开标题", item.displayTitle],
+        ["摘要", item.summary],
+        ["问题", item.problem],
+        ["方案", item.solution],
+        ["结果", item.impact],
+        ["指标", item.metrics],
+        ["能力", item.skills],
+        ["脱敏风险", item.privacyNote],
+      ]),
+    };
+  }
+
+  throw new Error("Unsupported analysis source type");
+}
+
+function buildPromptDraft({ analysisType, sourceTitle, contextSnapshot }) {
+  const label = analysisTypeLabel(analysisType);
+  return `你是一名严谨的 AI 产品经理面试与作品集顾问。请基于以下上下文，完成「${label}」。
+
+限制条件：
+- 只给建议，不替我做最终决策。
+- 不编造上下文里没有的事实。
+- 明确标注哪些判断是推断。
+- 输出应便于我人工筛选、改写和落地。
+
+上下文：
+${contextSnapshot}
+
+请按以下格式输出：
+1. 关键信息摘要
+2. 主要机会点
+3. 主要风险点
+4. 建议我追问或补充的信息
+5. 可执行的下一步建议
+
+分析对象：${sourceTitle || "未命名对象"}`;
+}
+
+async function buildAiAnalysisContext(input = {}) {
+  const analysisType = AI_ANALYSIS_TYPES.has(input.analysisType) ? input.analysisType : "other";
+  const sourceType = AI_ANALYSIS_SOURCE_TYPES.has(input.sourceType) ? input.sourceType : "freeform";
+  const { sourceTitle, contextSnapshot } = await sourceContext(
+    sourceType,
+    String(input.sourceId || "").trim(),
+    input.freeformContext ?? input.contextSnapshot,
+  );
+  return {
+    sourceTitle,
+    contextSnapshot,
+    promptDraft: buildPromptDraft({ analysisType, sourceTitle, contextSnapshot }),
   };
 }
 
@@ -2205,6 +2546,56 @@ async function handleApi(req, res, url) {
   if (url.pathname === "/api/portfolio-preview") {
     if (req.method === "GET") {
       return sendJson(res, 200, await portfolioPreviewData());
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/ai-analysis-context") {
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      return sendJson(res, 200, await buildAiAnalysisContext(body));
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/ai-analysis-notes") {
+    if (req.method === "GET") {
+      const analysisType = url.searchParams.get("analysisType") || "";
+      const sourceType = url.searchParams.get("sourceType") || "";
+      const status = url.searchParams.get("status") || "";
+      const aiAnalysisNotes = await listAiAnalysisNotes({ analysisType, sourceType, status });
+      return sendJson(res, 200, { aiAnalysisNotes });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const note = normalizeAiAnalysisNote(body);
+      await saveAiAnalysisNote(note);
+      return sendJson(res, 201, { aiAnalysisNote: note });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const aiAnalysisNoteMatch = url.pathname.match(/^\/api\/ai-analysis-notes\/([^/]+)$/);
+  if (aiAnalysisNoteMatch) {
+    const id = decodeURIComponent(aiAnalysisNoteMatch[1]);
+
+    if (req.method === "GET") {
+      const note = await getAiAnalysisNote(id);
+      if (!note) return notFound(res);
+      return sendJson(res, 200, { aiAnalysisNote: note });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getAiAnalysisNote(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      const note = normalizeAiAnalysisNote({ ...body, id }, existing);
+      await saveAiAnalysisNote(note);
+      return sendJson(res, 200, { aiAnalysisNote: note });
     }
 
     return methodNotAllowed(res);

@@ -587,6 +587,27 @@ h1 {
   color: var(--green);
 }
 
+.tag.ai-draft,
+.tag.ai-archived {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.tag.ai-prompt_ready {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.tag.ai-ai_responded {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.tag.ai-decided {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
 .next-action {
   margin: 10px 0 0;
   color: var(--muted);
@@ -752,6 +773,10 @@ textarea:focus {
 
 .compact-form textarea {
   min-height: 88px;
+}
+
+.ai-analysis-form textarea.tall-textarea {
+  min-height: 154px;
 }
 
 .page-actions {
