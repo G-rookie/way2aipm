@@ -258,6 +258,13 @@ h1 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
 .panel {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -756,6 +763,7 @@ textarea:focus {
 @media (max-width: 1120px) {
   .workspace,
   .dashboard-workspace,
+  .dashboard-grid,
   .pre-interview-layout,
   .placeholder-grid {
     grid-template-columns: 1fr;

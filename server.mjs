@@ -981,7 +981,14 @@ async function linkTaskToWeakness(task) {
   if (!weakness) return null;
 
   const linkedTrainingTaskIds = unique([...(weakness.linkedTrainingTaskIds || []), task.id]);
-  const status = task.status === "validated" ? "validating" : weakness.status === "open" ? "training" : weakness.status;
+  let status = weakness.status;
+  if (task.status === "validated" && task.validationNote.trim()) {
+    status = "repaired";
+  } else if (task.status === "validated") {
+    status = "validating";
+  } else if (["doing", "reviewing", "done"].includes(task.status) && weakness.status === "open") {
+    status = "training";
+  }
   const nextWeakness = normalizeWeakness({ ...weakness, linkedTrainingTaskIds, status }, weakness);
   await saveWeakness(nextWeakness);
   return nextWeakness;

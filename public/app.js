@@ -551,6 +551,22 @@ function openReviewForInterview(id) {
   render();
 }
 
+function openWeakness(id) {
+  state.activeModule = "weakness";
+  selectWeakness(id);
+}
+
+function openTrainingTask(taskId) {
+  const task = state.trainingTasks.find((item) => item.id === taskId);
+  if (!task) return;
+  state.activeModule = "weakness";
+  state.selectedWeaknessId = task.weaknessId;
+  state.selectedTrainingTaskId = task.id;
+  state.weaknessDraft = null;
+  state.trainingTaskDraft = null;
+  render();
+}
+
 function openPreInterviewForInterview(id) {
   selectInterviewForBrief(id);
   state.activeModule = "preInterview";
@@ -1008,6 +1024,12 @@ function attachCommonEvents() {
         openReviewForInterview(button.dataset.reviewInterviewId);
       }
     });
+  });
+  document.querySelectorAll("[data-dashboard-weakness-id]").forEach((button) => {
+    button.addEventListener("click", () => openWeakness(button.dataset.dashboardWeaknessId));
+  });
+  document.querySelectorAll("[data-dashboard-task-id]").forEach((button) => {
+    button.addEventListener("click", () => openTrainingTask(button.dataset.dashboardTaskId));
   });
   document.querySelector("#cancel-new-btn")?.addEventListener("click", () => {
     state.draft = null;
@@ -1467,11 +1489,17 @@ function renderDashboard() {
   const pendingReviews = state.interviews
     .filter((item) => item.status === "completed" && !reviewedInterviewIds.has(item.id))
     .slice(0, 6);
+  const openWeaknesses = state.weaknesses
+    .filter((item) => ["open", "training", "validating"].includes(item.status))
+    .slice(0, 6);
+  const activeTrainingTasks = state.trainingTasks
+    .filter((item) => ["todo", "doing", "reviewing"].includes(item.status))
+    .slice(0, 6);
 
   return `
     ${topbar}
     ${renderMetricGrid()}
-    <div class="workspace dashboard-workspace">
+    <div class="dashboard-grid">
       <section class="panel">
         <div class="panel-header">
           <div>
@@ -1555,6 +1583,64 @@ function renderDashboard() {
                     )
                     .join("")
                 : `<div class="empty">暂无岗位下一步动作。</div>`
+            }
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">开放缺陷</h2>
+            <p class="panel-subtitle">还没有被修复或归档的能力短板。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="work-list">
+            ${
+              openWeaknesses.length
+                ? openWeaknesses
+                    .map(
+                      (item) => `
+                        <button class="work-item" data-dashboard-weakness-id="${escapeHtml(item.id)}" type="button">
+                          <div>
+                            <p class="work-item-title">${escapeHtml(item.title)}</p>
+                            <p class="work-item-meta">${optionLabel(WEAKNESS_CATEGORIES, item.category)} · 证据 ${(item.relatedReviewIds || []).length} 条</p>
+                          </div>
+                          <span class="tag severity-${item.severity}">${optionLabel(SEVERITIES, item.severity)}</span>
+                        </button>
+                      `,
+                    )
+                    .join("")
+                : `<div class="empty">暂无开放缺陷。</div>`
+            }
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">训练任务</h2>
+            <p class="panel-subtitle">待做、进行中和待验收的修复动作。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="work-list">
+            ${
+              activeTrainingTasks.length
+                ? activeTrainingTasks
+                    .map(
+                      (item) => `
+                        <button class="work-item" data-dashboard-task-id="${escapeHtml(item.id)}" type="button">
+                          <div>
+                            <p class="work-item-title">${escapeHtml(item.title)}</p>
+                            <p class="work-item-meta">${optionLabel(TRAINING_TASK_TYPES, item.taskType)}${item.dueAt ? ` · ${escapeHtml(item.dueAt)}` : ""}</p>
+                          </div>
+                          <span class="tag task-${item.status}">${optionLabel(TRAINING_TASK_STATUSES, item.status)}</span>
+                        </button>
+                      `,
+                    )
+                    .join("")
+                : `<div class="empty">暂无进行中的训练任务。</div>`
             }
           </div>
         </div>
