@@ -2,7 +2,7 @@
 
 一个面向 AI PM 求职与成长的本地 Markdown 工作台。
 
-## 当前版本：v0.3 Slice 4
+## 当前版本：v0.4 Slice 1
 
 当前版本先实现：
 
@@ -15,6 +15,7 @@
 - 面试后复盘
 - 能力缺陷档案
 - 训练任务追踪
+- 项目弹药库基础记录
 - 总控台闭环待办与状态联动
 - Markdown 文件存储
 
@@ -25,6 +26,7 @@
 - `v0.1`：本地 Markdown 工作台、总控台、求职 Pipeline、岗位详情
 - `v0.2`：面试轮次、面试前作战 Brief、面试准备工作流体验补强
 - `v0.3`：已覆盖面试后复盘、能力缺陷、训练任务、闭环待办与状态联动
+- `v0.4`：进行中，已覆盖项目弹药库基础记录；项目追问与表达训练待补充
 
 ## 启动
 
@@ -95,6 +97,12 @@ content/weaknesses/{id}.md
 
 ```text
 content/training-tasks/{id}.md
+```
+
+项目弹药会保存到：
+
+```text
+content/project-ammos/{id}.md
 ```
 
 每个文件使用 JSON front matter 保存结构化字段，正文保留 Markdown 阅读区。

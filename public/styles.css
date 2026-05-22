@@ -491,6 +491,26 @@ h1 {
   color: var(--muted);
 }
 
+.tag.project-draft {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.tag.project-usable {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.tag.project-needs_deepening {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.tag.project-archived {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
 .next-action {
   margin: 10px 0 0;
   color: var(--muted);

@@ -119,12 +119,31 @@ const TRAINING_TASK_STATUSES = [
   ["cancelled", "已取消"],
 ];
 
+const PROJECT_TYPES = [
+  ["ai_product", "AI 产品项目"],
+  ["data_product", "数据产品项目"],
+  ["growth", "增长项目"],
+  ["platform", "平台项目"],
+  ["operation", "运营项目"],
+  ["coursework", "课程 / 练习项目"],
+  ["personal", "个人作品项目"],
+  ["other", "其他"],
+];
+
+const PROJECT_AMMO_STATUSES = [
+  ["draft", "草稿"],
+  ["usable", "可用于面试"],
+  ["needs_deepening", "需要深挖"],
+  ["archived", "已归档"],
+];
+
 const MODULES = [
   ["dashboard", "总控台", "00"],
   ["pipeline", "求职中台", "01"],
   ["preInterview", "面试前作战室", "02"],
   ["postInterview", "面试后复盘室", "03"],
   ["weakness", "缺陷与训练中心", "04"],
+  ["projectAmmo", "项目弹药库", "05"],
 ];
 
 const EMPTY_OPPORTUNITY = {
@@ -220,6 +239,25 @@ const EMPTY_TRAINING_TASK = {
   relatedInterviewRoundId: "",
 };
 
+const EMPTY_PROJECT_AMMO = {
+  projectName: "",
+  projectType: "personal",
+  role: "",
+  period: "",
+  background: "",
+  goal: "",
+  actions: "",
+  result: "",
+  metrics: "",
+  evidence: "",
+  aiRelevance: "",
+  pmCompetencies: "",
+  riskQuestions: "",
+  linkedWeaknessIds: [],
+  linkedTrainingTaskIds: [],
+  status: "draft",
+};
+
 const state = {
   activeModule: "dashboard",
   opportunities: [],
@@ -228,18 +266,21 @@ const state = {
   reviews: [],
   weaknesses: [],
   trainingTasks: [],
+  projectAmmos: [],
   selectedId: null,
   selectedInterviewId: null,
   selectedBriefId: null,
   selectedReviewId: null,
   selectedWeaknessId: null,
   selectedTrainingTaskId: null,
+  selectedProjectAmmoId: null,
   draft: null,
   interviewDraft: null,
   briefDraft: null,
   reviewDraft: null,
   weaknessDraft: null,
   trainingTaskDraft: null,
+  projectAmmoDraft: null,
   loading: true,
   saving: false,
   savingInterview: false,
@@ -247,6 +288,7 @@ const state = {
   savingReview: false,
   savingWeakness: false,
   savingTrainingTask: false,
+  savingProjectAmmo: false,
 };
 
 const app = document.querySelector("#app");
@@ -309,6 +351,7 @@ async function loadData() {
       reviewsPayload,
       weaknessesPayload,
       trainingTasksPayload,
+      projectAmmosPayload,
     ] = await Promise.all([
       api("/api/opportunities"),
       api("/api/interviews"),
@@ -316,6 +359,7 @@ async function loadData() {
       api("/api/interview-reviews"),
       api("/api/weaknesses"),
       api("/api/training-tasks"),
+      api("/api/project-ammos"),
     ]);
     state.opportunities = opportunitiesPayload.opportunities || [];
     state.interviews = interviewsPayload.interviews || [];
@@ -323,6 +367,7 @@ async function loadData() {
     state.reviews = reviewsPayload.reviews || [];
     state.weaknesses = weaknessesPayload.weaknesses || [];
     state.trainingTasks = trainingTasksPayload.tasks || [];
+    state.projectAmmos = projectAmmosPayload.projectAmmos || [];
     if (!state.selectedId && state.opportunities.length) {
       state.selectedId = state.opportunities[0].id;
     }
@@ -340,6 +385,9 @@ async function loadData() {
     }
     if (!state.selectedTrainingTaskId && state.selectedWeaknessId) {
       state.selectedTrainingTaskId = tasksForWeakness(state.selectedWeaknessId)[0]?.id || null;
+    }
+    if (!state.selectedProjectAmmoId && state.projectAmmos.length) {
+      state.selectedProjectAmmoId = state.projectAmmos[0].id;
     }
   } catch (error) {
     showToast(error.message);
@@ -460,6 +508,24 @@ function beginTrainingTaskForSelectedWeakness() {
     relatedInterviewRoundId: weakness.relatedInterviewRoundIds?.[0] || "",
   };
   state.selectedTrainingTaskId = null;
+  render();
+}
+
+function selectedProjectAmmo() {
+  if (state.projectAmmoDraft) return state.projectAmmoDraft;
+  return state.projectAmmos.find((item) => item.id === state.selectedProjectAmmoId) || null;
+}
+
+function selectProjectAmmo(id) {
+  state.selectedProjectAmmoId = id;
+  state.projectAmmoDraft = null;
+  render();
+}
+
+function beginNewProjectAmmo(seed = {}) {
+  state.activeModule = "projectAmmo";
+  state.projectAmmoDraft = { ...EMPTY_PROJECT_AMMO, ...seed };
+  state.selectedProjectAmmoId = null;
   render();
 }
 
@@ -671,6 +737,14 @@ function trainingTaskMetrics() {
     total: state.trainingTasks.length,
     active: state.trainingTasks.filter((task) => ["todo", "doing", "reviewing"].includes(task.status)).length,
     validated: state.trainingTasks.filter((task) => task.status === "validated").length,
+  };
+}
+
+function projectAmmoMetrics() {
+  return {
+    total: state.projectAmmos.length,
+    usable: state.projectAmmos.filter((item) => item.status === "usable").length,
+    needsDeepening: state.projectAmmos.filter((item) => item.status === "needs_deepening").length,
   };
 }
 
@@ -1031,6 +1105,9 @@ function attachCommonEvents() {
   document.querySelectorAll("[data-dashboard-task-id]").forEach((button) => {
     button.addEventListener("click", () => openTrainingTask(button.dataset.dashboardTaskId));
   });
+  document.querySelectorAll("[data-module-shortcut]").forEach((button) => {
+    button.addEventListener("click", () => switchModule(button.dataset.moduleShortcut));
+  });
   document.querySelector("#cancel-new-btn")?.addEventListener("click", () => {
     state.draft = null;
     state.selectedId = state.opportunities[0]?.id || null;
@@ -1065,6 +1142,10 @@ function attachCommonEvents() {
   document.querySelectorAll("[data-training-task-id]").forEach((button) => {
     button.addEventListener("click", () => selectTrainingTask(button.dataset.trainingTaskId));
   });
+  document.querySelector("#new-project-ammo-btn")?.addEventListener("click", () => beginNewProjectAmmo());
+  document.querySelectorAll("[data-project-ammo-id]").forEach((button) => {
+    button.addEventListener("click", () => selectProjectAmmo(button.dataset.projectAmmoId));
+  });
   document.querySelector("#cancel-interview-btn")?.addEventListener("click", () => {
     state.interviewDraft = null;
     state.selectedInterviewId = interviewsForOpportunity(state.selectedId)[0]?.id || null;
@@ -1090,12 +1171,18 @@ function attachCommonEvents() {
     state.selectedTrainingTaskId = state.selectedWeaknessId ? tasksForWeakness(state.selectedWeaknessId)[0]?.id || null : null;
     render();
   });
+  document.querySelector("#cancel-project-ammo-btn")?.addEventListener("click", () => {
+    state.projectAmmoDraft = null;
+    state.selectedProjectAmmoId = state.projectAmmos[0]?.id || null;
+    render();
+  });
   document.querySelector("#opportunity-form")?.addEventListener("submit", submitOpportunity);
   document.querySelector("#interview-form")?.addEventListener("submit", submitInterview);
   document.querySelector("#brief-form")?.addEventListener("submit", submitBrief);
   document.querySelector("#review-form")?.addEventListener("submit", submitReview);
   document.querySelector("#weakness-form")?.addEventListener("submit", submitWeakness);
   document.querySelector("#training-task-form")?.addEventListener("submit", submitTrainingTask);
+  document.querySelector("#project-ammo-form")?.addEventListener("submit", submitProjectAmmo);
 }
 
 function formToOpportunity(form) {
@@ -1474,6 +1561,66 @@ async function submitTrainingTask(event) {
   }
 }
 
+function formToProjectAmmo(form) {
+  const formData = new FormData(form);
+  const existing = selectedProjectAmmo();
+  return {
+    projectName: formData.get("projectName"),
+    projectType: formData.get("projectType"),
+    role: formData.get("role"),
+    period: formData.get("period"),
+    background: formData.get("background"),
+    goal: formData.get("goal"),
+    actions: formData.get("actions"),
+    result: formData.get("result"),
+    metrics: formData.get("metrics"),
+    evidence: formData.get("evidence"),
+    aiRelevance: formData.get("aiRelevance"),
+    pmCompetencies: formData.get("pmCompetencies"),
+    riskQuestions: formData.get("riskQuestions"),
+    linkedWeaknessIds: existing?.linkedWeaknessIds || [],
+    linkedTrainingTaskIds: existing?.linkedTrainingTaskIds || [],
+    status: formData.get("status"),
+  };
+}
+
+async function submitProjectAmmo(event) {
+  event.preventDefault();
+  if (state.savingProjectAmmo) return;
+
+  const form = event.currentTarget;
+  const payload = formToProjectAmmo(form);
+  if (state.projectAmmoDraft) {
+    state.projectAmmoDraft = { ...state.projectAmmoDraft, ...payload };
+  } else {
+    state.projectAmmos = state.projectAmmos.map((item) =>
+      item.id === state.selectedProjectAmmoId ? { ...item, ...payload } : item,
+    );
+  }
+  state.savingProjectAmmo = true;
+  render();
+
+  try {
+    const isNew = Boolean(state.projectAmmoDraft);
+    const path = isNew ? "/api/project-ammos" : `/api/project-ammos/${encodeURIComponent(state.selectedProjectAmmoId)}`;
+    const method = isNew ? "POST" : "PUT";
+    const result = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    state.selectedProjectAmmoId = result.projectAmmo.id;
+    state.projectAmmoDraft = null;
+    showToast("项目弹药已保存");
+    const list = await api("/api/project-ammos");
+    state.projectAmmos = list.projectAmmos || [];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingProjectAmmo = false;
+    render();
+  }
+}
+
 function renderDashboard() {
   const topbar = renderTopbar(
     "总控台",
@@ -1495,6 +1642,7 @@ function renderDashboard() {
   const activeTrainingTasks = state.trainingTasks
     .filter((item) => ["todo", "doing", "reviewing"].includes(item.status))
     .slice(0, 6);
+  const projectAmmo = projectAmmoMetrics();
 
   return `
     ${topbar}
@@ -1642,6 +1790,25 @@ function renderDashboard() {
                     .join("")
                 : `<div class="empty">暂无进行中的训练任务。</div>`
             }
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">项目弹药</h2>
+            <p class="panel-subtitle">可用于面试的项目素材与待深挖项目。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="work-list">
+            <button class="work-item" data-module-shortcut="projectAmmo" type="button">
+              <div>
+                <p class="work-item-title">可用项目：${projectAmmo.usable}</p>
+                <p class="work-item-meta">待深挖：${projectAmmo.needsDeepening} · 总数：${projectAmmo.total}</p>
+              </div>
+              <span class="tag stage">进入弹药库</span>
+            </button>
           </div>
         </div>
       </section>
@@ -2071,6 +2238,136 @@ function renderWeaknessDetail(weakness) {
   `;
 }
 
+function renderProjectAmmo() {
+  const data = projectAmmoMetrics();
+  const ammo = selectedProjectAmmo();
+
+  return `
+    ${renderTopbar("项目弹药库", "沉淀项目故事、关键证据、AI 相关性、可证明能力和高风险追问。", "05 Project Ammo")}
+    <section class="grid metrics compact-metrics">
+      <div class="metric"><div class="metric-label">项目总数</div><div class="metric-value">${data.total}</div></div>
+      <div class="metric"><div class="metric-label">可用于面试</div><div class="metric-value">${data.usable}</div></div>
+      <div class="metric"><div class="metric-label">需要深挖</div><div class="metric-value">${data.needsDeepening}</div></div>
+      <div class="metric"><div class="metric-label">草稿</div><div class="metric-value">${state.projectAmmos.filter((item) => item.status === "draft").length}</div></div>
+    </section>
+    <div class="workspace">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">项目列表</h2>
+            <p class="panel-subtitle">先把能证明能力的项目沉淀下来。</p>
+          </div>
+          <button class="btn primary" id="new-project-ammo-btn" type="button">新增项目</button>
+        </div>
+        <div class="panel-body">${renderProjectAmmoList()}</div>
+      </section>
+      ${renderProjectAmmoDetail(ammo)}
+    </div>
+  `;
+}
+
+function renderProjectAmmoList() {
+  if (!state.projectAmmos.length) {
+    return `<div class="empty">还没有项目弹药。先新增一个你最想在面试中讲清楚的项目。</div>`;
+  }
+
+  return `
+    <div class="work-list">
+      ${state.projectAmmos
+        .map(
+          (ammo) => `
+            <button class="work-item weakness-item ${ammo.id === state.selectedProjectAmmoId ? "active" : ""}" data-project-ammo-id="${escapeHtml(ammo.id)}" type="button">
+              <div>
+                <p class="work-item-title">${escapeHtml(ammo.projectName)}</p>
+                <p class="work-item-meta">${optionLabel(PROJECT_TYPES, ammo.projectType)}${ammo.role ? ` · ${escapeHtml(ammo.role)}` : ""}</p>
+              </div>
+              <span class="tag project-${ammo.status}">${optionLabel(PROJECT_AMMO_STATUSES, ammo.status)}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderProjectAmmoDetail(ammo) {
+  const isNew = Boolean(state.projectAmmoDraft);
+
+  if (!ammo) {
+    return `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">项目详情</h2>
+            <p class="panel-subtitle">选择一个项目，或新增第一条项目弹药。</p>
+          </div>
+        </div>
+        <div class="panel-body"><div class="empty">当前没有选中的项目。</div></div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">${isNew ? "新增项目弹药" : "项目弹药详情"}</h2>
+          <p class="panel-subtitle">保存后会写入 content/project-ammos 下的 Markdown 文件。</p>
+        </div>
+      </div>
+      <div class="panel-body">
+        <form id="project-ammo-form" class="form-grid">
+          <div class="form-field full">
+            <label>项目名称</label>
+            <input name="projectName" value="${escapeHtml(ammo.projectName)}" required />
+          </div>
+          <div class="form-field">
+            <label>项目类型</label>
+            ${renderSelect("projectType", PROJECT_TYPES, ammo.projectType)}
+          </div>
+          <div class="form-field">
+            <label>状态</label>
+            ${renderSelect("status", PROJECT_AMMO_STATUSES, ammo.status)}
+          </div>
+          <div class="form-field">
+            <label>我的角色</label>
+            <input name="role" value="${escapeHtml(ammo.role)}" placeholder="产品设计 / 数据分析 / 项目负责人" />
+          </div>
+          <div class="form-field">
+            <label>项目周期</label>
+            <input name="period" value="${escapeHtml(ammo.period)}" placeholder="2026.03 - 2026.05" />
+          </div>
+          ${renderBriefField("background", "背景", ammo.background, "为什么要做这个项目，业务/用户/场景是什么")}
+          ${renderBriefField("goal", "目标", ammo.goal, "项目要解决什么问题，成功标准是什么")}
+          ${renderBriefField("actions", "关键动作", ammo.actions, "你具体做了什么，怎么推动，怎么决策")}
+          ${renderBriefField("result", "结果", ammo.result, "项目产出、影响、结论")}
+          ${renderBriefField("metrics", "指标", ammo.metrics, "量化指标、前后对比、关键数据")}
+          ${renderBriefField("evidence", "证据", ammo.evidence, "PRD、原型、数据、截图、复盘、链接等")}
+          ${renderBriefField("aiRelevance", "AI 相关性", ammo.aiRelevance, "这个项目和 AI 产品能力的关系")}
+          ${renderBriefField("pmCompetencies", "可证明能力", ammo.pmCompetencies, "这个项目能证明哪些 AI PM 能力")}
+          ${renderBriefField("riskQuestions", "高风险追问", ammo.riskQuestions, "面试官可能追问什么，哪里容易被深挖")}
+          <div class="form-field full">
+            <div class="linked-panel">
+              <div>
+                <label>关联记录</label>
+                <p class="mini-meta">缺陷 ${(ammo.linkedWeaknessIds || []).length} 个 · 训练任务 ${(ammo.linkedTrainingTaskIds || []).length} 个</p>
+              </div>
+              <span class="mini-meta">项目追问将在下一切片补齐</span>
+            </div>
+          </div>
+          <div class="form-field full">
+            <div class="actions">
+              ${isNew ? `<button class="btn" id="cancel-project-ammo-btn" type="button">取消</button>` : ""}
+              <button class="btn primary" type="submit">${state.savingProjectAmmo ? "保存中..." : "保存项目弹药"}</button>
+            </div>
+            <div class="status-line">${ammo.updatedAt ? `上次更新：${escapeHtml(ammo.updatedAt)}` : "保存后会写入 content/project-ammos。"}</div>
+          </div>
+        </form>
+      </div>
+    </section>
+  `;
+}
+
 function renderTrainingTaskSection(weakness) {
   if (!weakness?.id) {
     return "";
@@ -2173,6 +2470,7 @@ function render() {
   if (state.activeModule === "preInterview") content = renderPreInterview();
   if (state.activeModule === "postInterview") content = renderPostInterview();
   if (state.activeModule === "weakness") content = renderWeakness();
+  if (state.activeModule === "projectAmmo") content = renderProjectAmmo();
 
   renderShell(content);
   attachCommonEvents();

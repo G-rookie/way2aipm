@@ -14,6 +14,7 @@ const PRE_INTERVIEW_BRIEFS_DIR = path.join(CONTENT_DIR, "pre-interview-briefs");
 const INTERVIEW_REVIEWS_DIR = path.join(CONTENT_DIR, "interview-reviews");
 const WEAKNESSES_DIR = path.join(CONTENT_DIR, "weaknesses");
 const TRAINING_TASKS_DIR = path.join(CONTENT_DIR, "training-tasks");
+const PROJECT_AMMOS_DIR = path.join(CONTENT_DIR, "project-ammos");
 
 const STAGES = new Set([
   "collected",
@@ -58,6 +59,17 @@ const TRAINING_TASK_TYPES = new Set([
   "other",
 ]);
 const TRAINING_TASK_STATUSES = new Set(["todo", "doing", "reviewing", "done", "validated", "cancelled"]);
+const PROJECT_TYPES = new Set([
+  "ai_product",
+  "data_product",
+  "growth",
+  "platform",
+  "operation",
+  "coursework",
+  "personal",
+  "other",
+]);
+const PROJECT_AMMO_STATUSES = new Set(["draft", "usable", "needs_deepening", "archived"]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -97,6 +109,7 @@ async function ensureContentDirs() {
   await mkdir(INTERVIEW_REVIEWS_DIR, { recursive: true });
   await mkdir(WEAKNESSES_DIR, { recursive: true });
   await mkdir(TRAINING_TASKS_DIR, { recursive: true });
+  await mkdir(PROJECT_AMMOS_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -150,6 +163,13 @@ function createTrainingTaskId(title) {
   return `task_${stamp}_${seed}_${random}`;
 }
 
+function createProjectAmmoId(projectName) {
+  const seed = slugify(projectName);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `ammo_${stamp}_${seed}_${random}`;
+}
+
 function sanitizeId(id, prefix) {
   const value = String(id || "");
   const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
@@ -193,6 +213,12 @@ function trainingTaskPath(id) {
   const safeId = sanitizeId(id, "task");
   if (!safeId) return null;
   return path.join(TRAINING_TASKS_DIR, `${safeId}.md`);
+}
+
+function projectAmmoPath(id) {
+  const safeId = sanitizeId(id, "ammo");
+  if (!safeId) return null;
+  return path.join(PROJECT_AMMOS_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -480,6 +506,51 @@ function normalizeTrainingTask(input, existing = {}, weakness) {
   };
 }
 
+function normalizeProjectAmmo(input, existing = {}) {
+  const now = new Date().toISOString();
+  const projectName = String(input.projectName ?? existing.projectName ?? "").trim();
+
+  if (!projectName) {
+    throw new Error("projectName is required");
+  }
+
+  const projectType = PROJECT_TYPES.has(input.projectType)
+    ? input.projectType
+    : existing.projectType || "personal";
+  const status = PROJECT_AMMO_STATUSES.has(input.status) ? input.status : existing.status || "draft";
+
+  return {
+    id: existing.id || input.id || createProjectAmmoId(projectName),
+    type: "projectAmmo",
+    projectName,
+    projectType,
+    role: String(input.role ?? existing.role ?? "").trim(),
+    period: String(input.period ?? existing.period ?? "").trim(),
+    background: String(input.background ?? existing.background ?? ""),
+    goal: String(input.goal ?? existing.goal ?? ""),
+    actions: String(input.actions ?? existing.actions ?? ""),
+    result: String(input.result ?? existing.result ?? ""),
+    metrics: String(input.metrics ?? existing.metrics ?? ""),
+    evidence: String(input.evidence ?? existing.evidence ?? ""),
+    aiRelevance: String(input.aiRelevance ?? existing.aiRelevance ?? ""),
+    pmCompetencies: String(input.pmCompetencies ?? existing.pmCompetencies ?? ""),
+    riskQuestions: String(input.riskQuestions ?? existing.riskQuestions ?? ""),
+    linkedWeaknessIds: unique([
+      ...asArray(existing.linkedWeaknessIds),
+      ...asArray(input.linkedWeaknessIds),
+      ...asArray(input.linkedWeaknessId),
+    ]),
+    linkedTrainingTaskIds: unique([
+      ...asArray(existing.linkedTrainingTaskIds),
+      ...asArray(input.linkedTrainingTaskIds),
+      ...asArray(input.linkedTrainingTaskId),
+    ]),
+    status,
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 function markdownEscapeTitle(value) {
   return String(value || "").replace(/\r?\n/g, " ").trim();
 }
@@ -533,6 +604,13 @@ function trainingTaskToMarkdown(task) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 目标能力\n\n${task.targetAbility}\n\n## 练习产物\n\n${task.practiceOutput}\n\n## 验收标准\n\n${task.acceptanceCriteria}\n\n## 验证记录\n\n${task.validationNote}\n`;
 }
 
+function projectAmmoToMarkdown(ammo) {
+  const frontMatter = JSON.stringify(ammo, null, 2);
+  const title = markdownEscapeTitle(ammo.projectName);
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 背景\n\n${ammo.background}\n\n## 目标\n\n${ammo.goal}\n\n## 我的角色\n\n${ammo.role}\n\n## 关键动作\n\n${ammo.actions}\n\n## 结果与指标\n\n${ammo.result}\n\n${ammo.metrics}\n\n## 证据\n\n${ammo.evidence}\n\n## AI 相关性\n\n${ammo.aiRelevance}\n\n## 可证明能力\n\n${ammo.pmCompetencies}\n\n## 高风险追问\n\n${ammo.riskQuestions}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -573,6 +651,12 @@ async function readWeaknessFile(filePath) {
 }
 
 async function readTrainingTaskFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readProjectAmmoFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -806,6 +890,46 @@ async function listTrainingTasks(filters = {}) {
   return filtered;
 }
 
+async function listProjectAmmos(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(PROJECT_AMMOS_DIR, { withFileTypes: true });
+  const ammos = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readProjectAmmoFile(path.join(PROJECT_AMMOS_DIR, entry.name));
+      if (item.type === "projectAmmo") {
+        ammos.push(item);
+      }
+    } catch (error) {
+      ammos.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "projectAmmo",
+        projectName: "读取失败",
+        projectType: "other",
+        status: "needs_deepening",
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = ammos.filter((ammo) => {
+    if (filters.status && ammo.status !== filters.status) return false;
+    if (filters.projectType && ammo.projectType !== filters.projectType) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const statusOrder = { needs_deepening: 0, draft: 1, usable: 2, archived: 3 };
+    const statusDiff = (statusOrder[a.status] ?? 4) - (statusOrder[b.status] ?? 4);
+    if (statusDiff) return statusDiff;
+    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  });
+  return filtered;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
@@ -878,6 +1002,18 @@ async function getTrainingTask(id) {
   }
 }
 
+async function getProjectAmmo(id) {
+  const filePath = projectAmmoPath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readProjectAmmoFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function saveOpportunity(opportunity) {
   await ensureContentDirs();
   const filePath = opportunityPath(opportunity.id);
@@ -936,6 +1072,16 @@ async function saveTrainingTask(task) {
   }
   await writeFile(filePath, trainingTaskToMarkdown(task), "utf8");
   return task;
+}
+
+async function saveProjectAmmo(ammo) {
+  await ensureContentDirs();
+  const filePath = projectAmmoPath(ammo.id);
+  if (!filePath) {
+    throw new Error("Invalid project ammo id");
+  }
+  await writeFile(filePath, projectAmmoToMarkdown(ammo), "utf8");
+  return ammo;
 }
 
 function briefStatusToPreparationStatus(status) {
@@ -1299,6 +1445,46 @@ async function handleApi(req, res, url) {
       await saveTrainingTask(task);
       const updatedWeakness = await linkTaskToWeakness(task);
       return sendJson(res, 200, { task, weakness: updatedWeakness });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/project-ammos") {
+    if (req.method === "GET") {
+      const status = url.searchParams.get("status") || "";
+      const projectType = url.searchParams.get("projectType") || "";
+      const projectAmmos = await listProjectAmmos({ status, projectType });
+      return sendJson(res, 200, { projectAmmos });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const projectAmmo = normalizeProjectAmmo(body);
+      await saveProjectAmmo(projectAmmo);
+      return sendJson(res, 201, { projectAmmo });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const projectAmmoMatch = url.pathname.match(/^\/api\/project-ammos\/([^/]+)$/);
+  if (projectAmmoMatch) {
+    const id = decodeURIComponent(projectAmmoMatch[1]);
+
+    if (req.method === "GET") {
+      const projectAmmo = await getProjectAmmo(id);
+      if (!projectAmmo) return notFound(res);
+      return sendJson(res, 200, { projectAmmo });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getProjectAmmo(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      const projectAmmo = normalizeProjectAmmo({ ...body, id }, existing);
+      await saveProjectAmmo(projectAmmo);
+      return sendJson(res, 200, { projectAmmo });
     }
 
     return methodNotAllowed(res);
