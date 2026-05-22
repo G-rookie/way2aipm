@@ -2,7 +2,7 @@
 
 一个面向 AI PM 求职与成长的本地 Markdown 工作台。
 
-## 当前版本：v0.2
+## 当前版本：v0.3 Slice 1
 
 当前版本先实现：
 
@@ -12,6 +12,7 @@
 - 岗位详情表单
 - 面试轮次创建与编辑
 - 面试前作战 Brief
+- 面试后复盘
 - Markdown 文件存储
 
 暂不实现 AI 分析、登录、云同步、公开发布和删除能力。
@@ -20,7 +21,7 @@
 
 - `v0.1`：本地 Markdown 工作台、总控台、求职 Pipeline、岗位详情
 - `v0.2`：面试轮次、面试前作战 Brief、面试准备工作流体验补强
-- `v0.3`：规划中，主题是面试后复盘、能力缺陷与训练任务闭环
+- `v0.3`：进行中，已覆盖面试后复盘基础能力；能力缺陷与训练任务闭环待补充
 
 ## 启动
 
@@ -73,6 +74,12 @@ content/interviews/{id}.md
 
 ```text
 content/pre-interview-briefs/{id}.md
+```
+
+面试复盘会保存到：
+
+```text
+content/interview-reviews/{id}.md
 ```
 
 每个文件使用 JSON front matter 保存结构化字段，正文保留 Markdown 阅读区。

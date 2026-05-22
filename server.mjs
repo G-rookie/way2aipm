@@ -11,6 +11,7 @@ const CONTENT_DIR = path.join(__dirname, "content");
 const OPPORTUNITIES_DIR = path.join(CONTENT_DIR, "opportunities");
 const INTERVIEWS_DIR = path.join(CONTENT_DIR, "interviews");
 const PRE_INTERVIEW_BRIEFS_DIR = path.join(CONTENT_DIR, "pre-interview-briefs");
+const INTERVIEW_REVIEWS_DIR = path.join(CONTENT_DIR, "interview-reviews");
 
 const STAGES = new Set([
   "collected",
@@ -30,6 +31,9 @@ const ROUND_TYPES = new Set(["first", "second", "third", "hr", "final", "other"]
 const INTERVIEW_STATUSES = new Set(["scheduled", "preparing", "completed", "reviewed", "cancelled"]);
 const PREPARATION_STATUSES = new Set(["not_started", "drafting", "ready", "needs_rework"]);
 const BRIEF_STATUSES = new Set(["draft", "ready", "needs_rework"]);
+const REVIEW_SELF_RATINGS = new Set(["great", "good", "mixed", "weak", "failed"]);
+const REVIEW_RESULTS = new Set(["unknown", "passed", "failed", "pending", "withdrawn"]);
+const REVIEW_STATUSES = new Set(["draft", "reviewed", "needs_followup"]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -66,6 +70,7 @@ async function ensureContentDirs() {
   await mkdir(OPPORTUNITIES_DIR, { recursive: true });
   await mkdir(INTERVIEWS_DIR, { recursive: true });
   await mkdir(PRE_INTERVIEW_BRIEFS_DIR, { recursive: true });
+  await mkdir(INTERVIEW_REVIEWS_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -98,6 +103,13 @@ function createBriefId(companyName, roundName) {
   return `brief_${stamp}_${seed}_${random}`;
 }
 
+function createReviewId(companyName, roundName) {
+  const seed = slugify(`${companyName}-${roundName}-review`);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `review_${stamp}_${seed}_${random}`;
+}
+
 function sanitizeId(id, prefix) {
   const value = String(id || "");
   const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
@@ -123,6 +135,12 @@ function briefPath(id) {
   const safeId = sanitizeId(id, "brief");
   if (!safeId) return null;
   return path.join(PRE_INTERVIEW_BRIEFS_DIR, `${safeId}.md`);
+}
+
+function reviewPath(id) {
+  const safeId = sanitizeId(id, "review");
+  if (!safeId) return null;
+  return path.join(INTERVIEW_REVIEWS_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -259,6 +277,60 @@ function normalizeBrief(input, existing = {}, opportunity, interview) {
   };
 }
 
+function normalizeReview(input, existing = {}, opportunity, interview) {
+  const now = new Date().toISOString();
+  const opportunityId = String(
+    input.opportunityId ?? existing.opportunityId ?? opportunity?.id ?? interview?.opportunityId ?? "",
+  ).trim();
+  const interviewRoundId = String(
+    input.interviewRoundId ?? existing.interviewRoundId ?? interview?.id ?? "",
+  ).trim();
+  const companyName = String(
+    input.companyName ?? existing.companyName ?? opportunity?.companyName ?? interview?.companyName ?? "",
+  ).trim();
+  const roleTitle = String(input.roleTitle ?? existing.roleTitle ?? opportunity?.roleTitle ?? interview?.roleTitle ?? "").trim();
+  const roundName = String(input.roundName ?? existing.roundName ?? interview?.roundName ?? "").trim();
+
+  if (!opportunityId) throw new Error("opportunityId is required");
+  if (!interviewRoundId) throw new Error("interviewRoundId is required");
+  if (!companyName) throw new Error("companyName is required");
+  if (!roleTitle) throw new Error("roleTitle is required");
+  if (!roundName) throw new Error("roundName is required");
+
+  const selfRating = REVIEW_SELF_RATINGS.has(input.selfRating)
+    ? input.selfRating
+    : existing.selfRating || "mixed";
+  const result = REVIEW_RESULTS.has(input.result) ? input.result : existing.result || "unknown";
+  const status = REVIEW_STATUSES.has(input.status) ? input.status : existing.status || "draft";
+
+  return {
+    id: existing.id || input.id || createReviewId(companyName, roundName),
+    type: "interviewReview",
+    opportunityId,
+    interviewRoundId,
+    companyName,
+    roleTitle,
+    roundName,
+    actualQuestions: String(input.actualQuestions ?? existing.actualQuestions ?? ""),
+    strongAnswers: String(input.strongAnswers ?? existing.strongAnswers ?? ""),
+    weakAnswers: String(input.weakAnswers ?? existing.weakAnswers ?? ""),
+    failurePoints: String(input.failurePoints ?? existing.failurePoints ?? ""),
+    interviewerSignals: String(input.interviewerSignals ?? existing.interviewerSignals ?? ""),
+    selfRating,
+    result,
+    summary: String(input.summary ?? existing.summary ?? ""),
+    linkedWeaknessIds: Array.isArray(input.linkedWeaknessIds)
+      ? input.linkedWeaknessIds
+      : existing.linkedWeaknessIds || [],
+    linkedTrainingTaskIds: Array.isArray(input.linkedTrainingTaskIds)
+      ? input.linkedTrainingTaskIds
+      : existing.linkedTrainingTaskIds || [],
+    status,
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 function markdownEscapeTitle(value) {
   return String(value || "").replace(/\r?\n/g, " ").trim();
 }
@@ -291,6 +363,13 @@ function briefToMarkdown(brief, opportunity, interview) {
   return `---\n${frontMatter}\n---\n\n# ${title} - 面试前作战 Brief\n\n## 公司调研\n\n${brief.companyResearch}\n\n## 业务与产品理解\n\n${brief.businessSummary}\n\n## 产品理解\n\n${brief.productSummary}\n\n## JD 拆解\n\n${brief.jdRequirements}\n\n## 隐性期待\n\n${brief.hiddenExpectations}\n\n## 匹配证据\n\n${brief.matchingEvidence}\n\n## 风险缺口\n\n${brief.riskGaps}\n\n## 项目经历映射\n\n${brief.projectMapping}\n\n## 高频问题预测\n\n${brief.questionPredictions}\n\n## 高风险问题\n\n${brief.highRiskQuestions}\n\n## 准备清单\n\n${brief.prepChecklist}\n`;
 }
 
+function reviewToMarkdown(review) {
+  const frontMatter = JSON.stringify(review, null, 2);
+  const title = markdownEscapeTitle(`${review.companyName} - ${review.roundName}复盘`);
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 实际问题\n\n${review.actualQuestions}\n\n## 强回答\n\n${review.strongAnswers}\n\n## 弱回答\n\n${review.weakAnswers}\n\n## 挂点分析\n\n${review.failurePoints}\n\n## 面试官信号\n\n${review.interviewerSignals}\n\n## 总结\n\n${review.summary}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -313,6 +392,12 @@ async function readInterviewFile(filePath) {
 }
 
 async function readBriefFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readReviewFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -426,6 +511,44 @@ async function listBriefs(filters = {}) {
   return filtered;
 }
 
+async function listReviews(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(INTERVIEW_REVIEWS_DIR, { withFileTypes: true });
+  const reviews = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readReviewFile(path.join(INTERVIEW_REVIEWS_DIR, entry.name));
+      if (item.type === "interviewReview") {
+        reviews.push(item);
+      }
+    } catch (error) {
+      reviews.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "interviewReview",
+        companyName: "读取失败",
+        roleTitle: entry.name,
+        roundName: "未知轮次",
+        selfRating: "failed",
+        result: "unknown",
+        status: "needs_followup",
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = reviews.filter((review) => {
+    if (filters.opportunityId && review.opportunityId !== filters.opportunityId) return false;
+    if (filters.interviewRoundId && review.interviewRoundId !== filters.interviewRoundId) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  return filtered;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
@@ -462,6 +585,18 @@ async function getBrief(id) {
   }
 }
 
+async function getReview(id) {
+  const filePath = reviewPath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readReviewFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function saveOpportunity(opportunity) {
   await ensureContentDirs();
   const filePath = opportunityPath(opportunity.id);
@@ -492,6 +627,16 @@ async function saveBrief(brief, opportunity, interview) {
   return brief;
 }
 
+async function saveReview(review) {
+  await ensureContentDirs();
+  const filePath = reviewPath(review.id);
+  if (!filePath) {
+    throw new Error("Invalid review id");
+  }
+  await writeFile(filePath, reviewToMarkdown(review), "utf8");
+  return review;
+}
+
 function briefStatusToPreparationStatus(status) {
   if (status === "ready") return "ready";
   if (status === "needs_rework") return "needs_rework";
@@ -507,6 +652,16 @@ async function syncInterviewPreparationStatus(interview, briefStatus) {
     interview,
     opportunity,
   );
+  await saveInterview(nextInterview);
+  return nextInterview;
+}
+
+async function syncInterviewReviewStatus(interview, reviewStatus) {
+  if (reviewStatus !== "reviewed") return interview;
+  const opportunity = await getOpportunity(interview.opportunityId);
+  if (!opportunity) return interview;
+
+  const nextInterview = normalizeInterview({ ...interview, status: "reviewed" }, interview, opportunity);
   await saveInterview(nextInterview);
   return nextInterview;
 }
@@ -666,6 +821,64 @@ async function handleApi(req, res, url) {
       await saveBrief(brief, opportunity, interview);
       const updatedInterview = await syncInterviewPreparationStatus(interview, brief.status);
       return sendJson(res, 200, { brief, interview: updatedInterview });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/interview-reviews") {
+    if (req.method === "GET") {
+      const opportunityId = url.searchParams.get("opportunityId") || "";
+      const interviewRoundId = url.searchParams.get("interviewRoundId") || "";
+      const reviews = await listReviews({ opportunityId, interviewRoundId });
+      return sendJson(res, 200, { reviews });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const opportunity = await getOpportunity(body.opportunityId);
+      const interview = await getInterview(body.interviewRoundId);
+      if (!opportunity) {
+        return sendJson(res, 400, { error: "Related opportunity not found" });
+      }
+      if (!interview) {
+        return sendJson(res, 400, { error: "Related interview not found" });
+      }
+      const review = normalizeReview(body, {}, opportunity, interview);
+      await saveReview(review);
+      const updatedInterview = await syncInterviewReviewStatus(interview, review.status);
+      return sendJson(res, 201, { review, interview: updatedInterview });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const reviewMatch = url.pathname.match(/^\/api\/interview-reviews\/([^/]+)$/);
+  if (reviewMatch) {
+    const id = decodeURIComponent(reviewMatch[1]);
+
+    if (req.method === "GET") {
+      const review = await getReview(id);
+      if (!review) return notFound(res);
+      return sendJson(res, 200, { review });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getReview(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      const opportunity = await getOpportunity(body.opportunityId || existing.opportunityId);
+      const interview = await getInterview(body.interviewRoundId || existing.interviewRoundId);
+      if (!opportunity) {
+        return sendJson(res, 400, { error: "Related opportunity not found" });
+      }
+      if (!interview) {
+        return sendJson(res, 400, { error: "Related interview not found" });
+      }
+      const review = normalizeReview({ ...body, id }, existing, opportunity, interview);
+      await saveReview(review);
+      const updatedInterview = await syncInterviewReviewStatus(interview, review.status);
+      return sendJson(res, 200, { review, interview: updatedInterview });
     }
 
     return methodNotAllowed(res);

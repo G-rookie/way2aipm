@@ -53,6 +53,28 @@ const BRIEF_STATUSES = [
   ["needs_rework", "需要补强"],
 ];
 
+const REVIEW_SELF_RATINGS = [
+  ["great", "表现很好"],
+  ["good", "整体不错"],
+  ["mixed", "有好有坏"],
+  ["weak", "明显偏弱"],
+  ["failed", "严重失误"],
+];
+
+const REVIEW_RESULTS = [
+  ["unknown", "未知"],
+  ["passed", "通过"],
+  ["failed", "未通过"],
+  ["pending", "等待结果"],
+  ["withdrawn", "主动放弃"],
+];
+
+const REVIEW_STATUSES = [
+  ["draft", "草稿"],
+  ["reviewed", "已复盘"],
+  ["needs_followup", "需要追踪"],
+];
+
 const MODULES = [
   ["dashboard", "总控台", "00"],
   ["pipeline", "求职中台", "01"],
@@ -107,21 +129,44 @@ const EMPTY_BRIEF = {
   status: "draft",
 };
 
+const EMPTY_REVIEW = {
+  opportunityId: "",
+  interviewRoundId: "",
+  companyName: "",
+  roleTitle: "",
+  roundName: "",
+  actualQuestions: "",
+  strongAnswers: "",
+  weakAnswers: "",
+  failurePoints: "",
+  interviewerSignals: "",
+  selfRating: "mixed",
+  result: "unknown",
+  summary: "",
+  linkedWeaknessIds: [],
+  linkedTrainingTaskIds: [],
+  status: "draft",
+};
+
 const state = {
   activeModule: "dashboard",
   opportunities: [],
   interviews: [],
   briefs: [],
+  reviews: [],
   selectedId: null,
   selectedInterviewId: null,
   selectedBriefId: null,
+  selectedReviewId: null,
   draft: null,
   interviewDraft: null,
   briefDraft: null,
+  reviewDraft: null,
   loading: true,
   saving: false,
   savingInterview: false,
   savingBrief: false,
+  savingReview: false,
 };
 
 const app = document.querySelector("#app");
@@ -177,14 +222,16 @@ async function loadData() {
   state.loading = true;
   render();
   try {
-    const [opportunitiesPayload, interviewsPayload, briefsPayload] = await Promise.all([
+    const [opportunitiesPayload, interviewsPayload, briefsPayload, reviewsPayload] = await Promise.all([
       api("/api/opportunities"),
       api("/api/interviews"),
       api("/api/pre-interview-briefs"),
+      api("/api/interview-reviews"),
     ]);
     state.opportunities = opportunitiesPayload.opportunities || [];
     state.interviews = interviewsPayload.interviews || [];
     state.briefs = briefsPayload.briefs || [];
+    state.reviews = reviewsPayload.reviews || [];
     if (!state.selectedId && state.opportunities.length) {
       state.selectedId = state.opportunities[0].id;
     }
@@ -193,6 +240,9 @@ async function loadData() {
     }
     if (!state.selectedBriefId && state.selectedInterviewId) {
       state.selectedBriefId = briefForInterview(state.selectedInterviewId)?.id || null;
+    }
+    if (!state.selectedReviewId && state.selectedInterviewId) {
+      state.selectedReviewId = reviewForInterview(state.selectedInterviewId)?.id || null;
     }
   } catch (error) {
     showToast(error.message);
@@ -247,6 +297,17 @@ function selectedBrief() {
   return state.briefs.find((item) => item.id === state.selectedBriefId) || null;
 }
 
+function reviewForInterview(interviewRoundId) {
+  return state.reviews
+    .filter((review) => review.interviewRoundId === interviewRoundId)
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0] || null;
+}
+
+function selectedReview() {
+  if (state.reviewDraft) return state.reviewDraft;
+  return state.reviews.find((item) => item.id === state.selectedReviewId) || null;
+}
+
 function beginNewOpportunity() {
   state.activeModule = "pipeline";
   state.selectedId = null;
@@ -261,10 +322,12 @@ function selectOpportunity(id) {
   state.draft = null;
   state.interviewDraft = null;
   state.briefDraft = null;
+  state.reviewDraft = null;
   const currentInterview = state.interviews.find((item) => item.id === state.selectedInterviewId);
   if (currentInterview?.opportunityId !== id) {
     state.selectedInterviewId = interviewsForOpportunity(id)[0]?.id || null;
     state.selectedBriefId = state.selectedInterviewId ? briefForInterview(state.selectedInterviewId)?.id || null : null;
+    state.selectedReviewId = state.selectedInterviewId ? reviewForInterview(state.selectedInterviewId)?.id || null : null;
   }
   render();
 }
@@ -290,7 +353,9 @@ function selectInterview(id) {
   state.selectedInterviewId = id;
   state.interviewDraft = null;
   state.briefDraft = null;
+  state.reviewDraft = null;
   state.selectedBriefId = briefForInterview(id)?.id || null;
+  state.selectedReviewId = reviewForInterview(id)?.id || null;
   render();
 }
 
@@ -301,7 +366,15 @@ function selectInterviewForBrief(id) {
   state.selectedId = interview.opportunityId;
   state.interviewDraft = null;
   state.briefDraft = null;
+  state.reviewDraft = null;
   state.selectedBriefId = briefForInterview(id)?.id || null;
+  state.selectedReviewId = reviewForInterview(id)?.id || null;
+  render();
+}
+
+function openReviewForInterview(id) {
+  selectInterviewForBrief(id);
+  state.activeModule = "postInterview";
   render();
 }
 
@@ -323,6 +396,24 @@ function beginBriefForSelectedInterview() {
     interviewRoundId: interview.id,
   };
   state.selectedBriefId = null;
+  render();
+}
+
+function beginReviewForSelectedInterview() {
+  const interview = selectedInterview();
+  if (!interview?.id) {
+    showToast("请先选择一轮面试");
+    return;
+  }
+  state.reviewDraft = {
+    ...EMPTY_REVIEW,
+    opportunityId: interview.opportunityId,
+    interviewRoundId: interview.id,
+    companyName: interview.companyName,
+    roleTitle: interview.roleTitle,
+    roundName: interview.roundName,
+  };
+  state.selectedReviewId = null;
   render();
 }
 
@@ -362,6 +453,18 @@ function interviewMetrics() {
     needsPrep: state.interviews.filter((item) =>
       ["not_started", "drafting", "needs_rework"].includes(item.preparationStatus),
     ).length,
+  };
+}
+
+function reviewMetrics() {
+  const reviewInterviewIds = new Set(state.reviews.map((review) => review.interviewRoundId));
+  const needsReview = state.interviews.filter(
+    (item) => ["completed"].includes(item.status) && !reviewInterviewIds.has(item.id),
+  ).length;
+  return {
+    total: state.reviews.length,
+    needsReview,
+    followup: state.reviews.filter((review) => review.status === "needs_followup").length,
   };
 }
 
@@ -418,12 +521,13 @@ function renderTopbar(title, subtitle, eyebrow = "way2AIPM OS") {
 function renderMetricGrid() {
   const data = metrics();
   const interviewData = interviewMetrics();
+  const reviewData = reviewMetrics();
   return `
     <section class="grid metrics">
       <div class="metric"><div class="metric-label">全部机会</div><div class="metric-value">${data.total}</div></div>
       <div class="metric"><div class="metric-label">进行中</div><div class="metric-value">${data.active}</div></div>
       <div class="metric"><div class="metric-label">待准备面试</div><div class="metric-value">${interviewData.needsPrep}</div></div>
-      <div class="metric"><div class="metric-label">高风险</div><div class="metric-value">${data.highRisk}</div></div>
+      <div class="metric"><div class="metric-label">待复盘面试</div><div class="metric-value">${reviewData.needsReview}</div></div>
     </section>
   `;
 }
@@ -710,6 +814,9 @@ function attachCommonEvents() {
         state.selectedBriefId = briefForInterview(button.dataset.interviewId)?.id || null;
         render();
       }
+      if (button.dataset.reviewInterviewId) {
+        openReviewForInterview(button.dataset.reviewInterviewId);
+      }
     });
   });
   document.querySelector("#cancel-new-btn")?.addEventListener("click", () => {
@@ -730,7 +837,11 @@ function attachCommonEvents() {
   document.querySelector("#pre-interview-selector")?.addEventListener("change", (event) => {
     selectInterviewForBrief(event.target.value);
   });
+  document.querySelector("#review-selector")?.addEventListener("change", (event) => {
+    selectInterviewForBrief(event.target.value);
+  });
   document.querySelector("#create-brief-btn")?.addEventListener("click", beginBriefForSelectedInterview);
+  document.querySelector("#create-review-btn")?.addEventListener("click", beginReviewForSelectedInterview);
   document.querySelector("#cancel-interview-btn")?.addEventListener("click", () => {
     state.interviewDraft = null;
     state.selectedInterviewId = interviewsForOpportunity(state.selectedId)[0]?.id || null;
@@ -741,9 +852,15 @@ function attachCommonEvents() {
     state.selectedBriefId = state.selectedInterviewId ? briefForInterview(state.selectedInterviewId)?.id || null : null;
     render();
   });
+  document.querySelector("#cancel-review-btn")?.addEventListener("click", () => {
+    state.reviewDraft = null;
+    state.selectedReviewId = state.selectedInterviewId ? reviewForInterview(state.selectedInterviewId)?.id || null : null;
+    render();
+  });
   document.querySelector("#opportunity-form")?.addEventListener("submit", submitOpportunity);
   document.querySelector("#interview-form")?.addEventListener("submit", submitInterview);
   document.querySelector("#brief-form")?.addEventListener("submit", submitBrief);
+  document.querySelector("#review-form")?.addEventListener("submit", submitReview);
 }
 
 function formToOpportunity(form) {
@@ -809,12 +926,14 @@ async function submitOpportunity(event) {
     state.selectedId = result.opportunity.id;
     state.draft = null;
     showToast("已保存到 Markdown");
-    const [opportunityList, interviewList] = await Promise.all([
+    const [opportunityList, interviewList, reviewList] = await Promise.all([
       api("/api/opportunities"),
       api("/api/interviews"),
+      api("/api/interview-reviews"),
     ]);
     state.opportunities = opportunityList.opportunities || [];
     state.interviews = interviewList.interviews || [];
+    state.reviews = reviewList.reviews || [];
     const briefList = await api("/api/pre-interview-briefs");
     state.briefs = briefList.briefs || [];
   } catch (error) {
@@ -852,12 +971,14 @@ async function submitInterview(event) {
     state.selectedInterviewId = result.interview.id;
     state.interviewDraft = null;
     showToast("面试轮次已保存");
-    const [interviewList, briefList] = await Promise.all([
+    const [interviewList, briefList, reviewList] = await Promise.all([
       api("/api/interviews"),
       api("/api/pre-interview-briefs"),
+      api("/api/interview-reviews"),
     ]);
     state.interviews = interviewList.interviews || [];
     state.briefs = briefList.briefs || [];
+    state.reviews = reviewList.reviews || [];
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -930,6 +1051,70 @@ async function submitBrief(event) {
   }
 }
 
+function formToReview(form) {
+  const formData = new FormData(form);
+  const interview = selectedInterview();
+  return {
+    opportunityId: formData.get("opportunityId") || interview?.opportunityId,
+    interviewRoundId: formData.get("interviewRoundId") || interview?.id,
+    companyName: interview?.companyName,
+    roleTitle: interview?.roleTitle,
+    roundName: interview?.roundName,
+    actualQuestions: formData.get("actualQuestions"),
+    strongAnswers: formData.get("strongAnswers"),
+    weakAnswers: formData.get("weakAnswers"),
+    failurePoints: formData.get("failurePoints"),
+    interviewerSignals: formData.get("interviewerSignals"),
+    selfRating: formData.get("selfRating"),
+    result: formData.get("result"),
+    summary: formData.get("summary"),
+    status: formData.get("status"),
+  };
+}
+
+async function submitReview(event) {
+  event.preventDefault();
+  if (state.savingReview) return;
+
+  const form = event.currentTarget;
+  const payload = formToReview(form);
+  if (state.reviewDraft) {
+    state.reviewDraft = { ...state.reviewDraft, ...payload };
+  } else {
+    state.reviews = state.reviews.map((item) =>
+      item.id === state.selectedReviewId ? { ...item, ...payload } : item,
+    );
+  }
+  state.savingReview = true;
+  render();
+
+  try {
+    const isNew = Boolean(state.reviewDraft);
+    const path = isNew
+      ? "/api/interview-reviews"
+      : `/api/interview-reviews/${encodeURIComponent(state.selectedReviewId)}`;
+    const method = isNew ? "POST" : "PUT";
+    const result = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    state.selectedReviewId = result.review.id;
+    state.reviewDraft = null;
+    showToast("面试复盘已保存");
+    const [reviewList, interviewList] = await Promise.all([
+      api("/api/interview-reviews"),
+      api("/api/interviews"),
+    ]);
+    state.reviews = reviewList.reviews || [];
+    state.interviews = interviewList.interviews || [];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingReview = false;
+    render();
+  }
+}
+
 function renderDashboard() {
   const topbar = renderTopbar(
     "总控台",
@@ -940,6 +1125,10 @@ function renderDashboard() {
   const highRisk = state.opportunities.filter((item) => item.riskLevel === "high").slice(0, 4);
   const pendingInterviews = state.interviews
     .filter((item) => !["completed", "reviewed", "cancelled"].includes(item.status))
+    .slice(0, 6);
+  const reviewedInterviewIds = new Set(state.reviews.map((review) => review.interviewRoundId));
+  const pendingReviews = state.interviews
+    .filter((item) => item.status === "completed" && !reviewedInterviewIds.has(item.id))
     .slice(0, 6);
 
   return `
@@ -978,16 +1167,28 @@ function renderDashboard() {
       <section class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">高风险机会</h2>
-            <p class="panel-subtitle">优先处理可能影响面试表现的岗位。</p>
+            <h2 class="panel-title">待复盘面试</h2>
+            <p class="panel-subtitle">标记为已完成、但还没有复盘的面试。</p>
           </div>
         </div>
         <div class="panel-body">
           <div class="work-list">
             ${
-              highRisk.length
-                ? highRisk.map(renderOpportunityCard).join("")
-                : `<div class="empty">当前没有高风险岗位。</div>`
+              pendingReviews.length
+                ? pendingReviews
+                    .map(
+                      (item) => `
+                        <button class="work-item" data-select-id="${escapeHtml(item.opportunityId)}" data-review-interview-id="${escapeHtml(item.id)}" type="button">
+                          <div>
+                            <p class="work-item-title">${escapeHtml(item.companyName)} · ${escapeHtml(item.roleTitle)}</p>
+                            <p class="work-item-meta">${escapeHtml(item.roundName)} · ${optionLabel(ROUND_TYPES, item.roundType)}${item.scheduledAt ? ` · ${escapeHtml(formatDateTime(item.scheduledAt))}` : ""}</p>
+                          </div>
+                          <span class="tag stage">待复盘</span>
+                        </button>
+                      `,
+                    )
+                    .join("")
+                : `<div class="empty">暂无待复盘面试。</div>`
             }
           </div>
         </div>
@@ -1183,19 +1384,129 @@ function renderPreInterview() {
 }
 
 function renderPostInterview() {
+  const interview = selectedInterview();
   return `
-    ${renderTopbar("面试后复盘室", "先预留真实问题、回答评分、挂点分析和训练任务入口。", "03 Post-Interview Review")}
+    ${renderTopbar("面试后复盘室", "记录真实问题、回答表现、挂点分析和面试结果，把一次面试变成下一轮的训练资产。", "03 Post-Interview Review")}
+    ${renderReviewProgress()}
+    <div class="pre-interview-layout">
+      ${renderReviewSelector()}
+      ${renderReviewForm(interview)}
+    </div>
+  `;
+}
+
+function renderReviewSelector() {
+  if (!state.interviews.length) {
+    return `<div class="empty">还没有面试轮次。先到求职中台创建面试轮次。</div>`;
+  }
+
+  return `
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">复盘工作流占位</h2>
-          <p class="panel-subtitle">下一阶段从 Pipeline 的已面试机会进入这里。</p>
+          <h2 class="panel-title">选择面试轮次</h2>
+          <p class="panel-subtitle">优先复盘状态为已完成的面试。</p>
         </div>
       </div>
-      <div class="panel-body placeholder-grid">
-        <div class="placeholder-card"><h3>实际问题记录</h3><p>面试结束后尽快记录真实问题和追问路径。</p></div>
-        <div class="placeholder-card"><h3>回答评级</h3><p>区分强回答、弱回答和没有证据支撑的回答。</p></div>
-        <div class="placeholder-card"><h3>挂点分析</h3><p>把一次失败回答关联到具体能力缺陷，而不是停留在情绪判断。</p></div>
+      <div class="panel-body">
+        <select id="review-selector">
+          ${state.interviews
+            .map(
+              (interview) => `
+                <option value="${escapeHtml(interview.id)}" ${interview.id === state.selectedInterviewId ? "selected" : ""}>
+                  ${escapeHtml(interview.companyName)} · ${escapeHtml(interview.roleTitle)} · ${escapeHtml(interview.roundName)} · ${optionLabel(INTERVIEW_STATUSES, interview.status)}
+                </option>
+              `,
+            )
+            .join("")}
+        </select>
+      </div>
+    </section>
+  `;
+}
+
+function renderReviewProgress() {
+  const data = reviewMetrics();
+  return `
+    <section class="grid metrics compact-metrics">
+      <div class="metric"><div class="metric-label">复盘总数</div><div class="metric-value">${data.total}</div></div>
+      <div class="metric"><div class="metric-label">待复盘</div><div class="metric-value">${data.needsReview}</div></div>
+      <div class="metric"><div class="metric-label">需追踪</div><div class="metric-value">${data.followup}</div></div>
+      <div class="metric"><div class="metric-label">已复盘</div><div class="metric-value">${state.reviews.filter((review) => review.status === "reviewed").length}</div></div>
+    </section>
+  `;
+}
+
+function renderReviewForm(interview) {
+  const review = selectedReview();
+  const isNew = Boolean(state.reviewDraft);
+
+  if (!interview) {
+    return `<div class="empty">请选择一轮面试。</div>`;
+  }
+
+  if (!review) {
+    return `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">${escapeHtml(interview.companyName)} · ${escapeHtml(interview.roundName)}</h2>
+            <p class="panel-subtitle">还没有面试复盘，面试结束后尽快记录真实问题。</p>
+          </div>
+          <button class="btn primary" id="create-review-btn" type="button">创建复盘</button>
+        </div>
+        <div class="panel-body">
+          <div class="empty">创建后可以记录实际问题、强弱回答、挂点分析和面试官信号。</div>
+        </div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="panel brief-panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">${escapeHtml(interview.companyName)} · ${escapeHtml(interview.roleTitle)}</h2>
+          <p class="panel-subtitle">${escapeHtml(interview.roundName)} · ${optionLabel(ROUND_TYPES, interview.roundType)}${interview.scheduledAt ? ` · ${escapeHtml(formatDateTime(interview.scheduledAt))}` : ""}</p>
+        </div>
+        <div class="tag-row">
+          <span class="tag stage">${optionLabel(REVIEW_STATUSES, review.status)}</span>
+        </div>
+      </div>
+      <div class="panel-body">
+        <form id="review-form" class="form-grid brief-form">
+          <div class="form-field">
+            <label>复盘状态</label>
+            ${renderSelect("status", REVIEW_STATUSES, review.status)}
+          </div>
+          <div class="form-field">
+            <label>自我评级</label>
+            ${renderSelect("selfRating", REVIEW_SELF_RATINGS, review.selfRating)}
+          </div>
+          <div class="form-field">
+            <label>面试结果</label>
+            ${renderSelect("result", REVIEW_RESULTS, review.result)}
+          </div>
+          <div class="form-field">
+            <label>关联面试</label>
+            <input value="${escapeHtml(`${interview.companyName} · ${interview.roundName}`)}" disabled />
+          </div>
+          ${renderBriefField("actualQuestions", "实际问题", review.actualQuestions, "面试官实际问了什么，尽量按顺序记录")}
+          ${renderBriefField("strongAnswers", "强回答", review.strongAnswers, "哪些回答有证据、有结构、有说服力")}
+          ${renderBriefField("weakAnswers", "弱回答", review.weakAnswers, "哪些回答卡住、泛泛而谈或缺少证据")}
+          ${renderBriefField("failurePoints", "挂点分析", review.failurePoints, "弱回答背后的原因是什么，是项目不深、认知不足还是表达不稳")}
+          ${renderBriefField("interviewerSignals", "面试官信号", review.interviewerSignals, "追问、打断、认可、质疑、反馈等信号")}
+          ${renderBriefField("summary", "总结", review.summary, "本轮最大的收获、风险和下一步动作")}
+          <input name="opportunityId" type="hidden" value="${escapeHtml(interview.opportunityId)}" />
+          <input name="interviewRoundId" type="hidden" value="${escapeHtml(interview.id)}" />
+          <div class="form-field full">
+            <div class="actions">
+              ${isNew ? `<button class="btn" id="cancel-review-btn" type="button">取消</button>` : ""}
+              <button class="btn primary" type="submit">${state.savingReview ? "保存中..." : "保存面试复盘"}</button>
+            </div>
+            <div class="status-line">${review.updatedAt ? `上次更新：${escapeHtml(review.updatedAt)}` : "保存后会写入 content/interview-reviews。"}</div>
+          </div>
+        </form>
       </div>
     </section>
   `;
