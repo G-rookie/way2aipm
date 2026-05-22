@@ -567,6 +567,26 @@ h1 {
   color: var(--green);
 }
 
+.tag.portfolio-draft,
+.tag.portfolio-private,
+.tag.portfolio-hidden {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.tag.portfolio-reviewing,
+.tag.portfolio-needs_sanitizing,
+.tag.portfolio-needs_evidence {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.tag.portfolio-ready,
+.tag.portfolio-published_ready {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
 .next-action {
   margin: 10px 0 0;
   color: var(--muted);
@@ -734,6 +754,11 @@ textarea:focus {
   min-height: 88px;
 }
 
+.page-actions {
+  justify-content: flex-end;
+  margin: 0 0 14px;
+}
+
 .work-list {
   display: grid;
   gap: 10px;
@@ -774,6 +799,86 @@ textarea:focus {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
+}
+
+.portfolio-preview {
+  display: grid;
+  gap: 18px;
+}
+
+.portfolio-hero {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 28px;
+  background: #fffdf8;
+  box-shadow: var(--shadow);
+}
+
+.portfolio-hero h1 {
+  margin: 6px 0;
+  font-size: 34px;
+}
+
+.portfolio-headline {
+  margin: 0;
+  color: var(--accent-ink);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.portfolio-summary {
+  max-width: 760px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.portfolio-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.portfolio-card,
+.portfolio-contact {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.portfolio-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.portfolio-card h2,
+.portfolio-contact h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.portfolio-card-subtitle {
+  color: var(--accent-ink);
+  font-weight: 800;
+}
+
+.portfolio-facts {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.portfolio-facts dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.portfolio-facts dd {
+  margin: 4px 0 0;
+  line-height: 1.55;
 }
 
 .placeholder-card {
@@ -841,7 +946,8 @@ textarea:focus {
   .dashboard-workspace,
   .dashboard-grid,
   .pre-interview-layout,
-  .placeholder-grid {
+  .placeholder-grid,
+  .portfolio-preview-grid {
     grid-template-columns: 1fr;
   }
 

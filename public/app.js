@@ -176,6 +176,26 @@ const EXPRESSION_DRILL_STATUSES = [
   ["archived", "已归档"],
 ];
 
+const PORTFOLIO_STATUSES = [
+  ["draft", "草稿"],
+  ["reviewing", "整理中"],
+  ["ready", "可预览"],
+  ["published_ready", "具备公开准备"],
+];
+
+const PORTFOLIO_VISIBILITIES = [
+  ["private", "仅自己可见"],
+  ["portfolio", "进入作品集"],
+  ["hidden", "暂时隐藏"],
+];
+
+const PORTFOLIO_READINESS = [
+  ["draft", "草稿"],
+  ["needs_sanitizing", "需要脱敏"],
+  ["needs_evidence", "需要补证据"],
+  ["ready", "可展示"],
+];
+
 const MODULES = [
   ["dashboard", "总控台", "00"],
   ["pipeline", "求职中台", "01"],
@@ -183,6 +203,7 @@ const MODULES = [
   ["postInterview", "面试后复盘室", "03"],
   ["weakness", "缺陷与训练中心", "04"],
   ["projectAmmo", "项目弹药库", "05"],
+  ["portfolio", "作品集产品线", "06"],
 ];
 
 const EMPTY_OPPORTUNITY = {
@@ -321,6 +342,39 @@ const EMPTY_EXPRESSION_DRILL = {
   linkedTrainingTaskId: "",
 };
 
+const EMPTY_PORTFOLIO_PROFILE = {
+  displayName: "",
+  headline: "",
+  targetRole: "",
+  location: "",
+  summary: "",
+  coreSkills: "",
+  contactNote: "",
+  portfolioStatus: "draft",
+  publishChecklist:
+    "隐藏敏感公司、业务、数据\n保留足够证据但不泄露隐私\n项目结果真实、可解释\n项目角色表述准确\n至少 2 个可展示项目\n联系方式适合公开",
+};
+
+const EMPTY_PORTFOLIO_PROJECT = {
+  projectAmmoId: "",
+  projectName: "",
+  displayTitle: "",
+  subtitle: "",
+  summary: "",
+  role: "",
+  period: "",
+  problem: "",
+  solution: "",
+  impact: "",
+  metrics: "",
+  skills: "",
+  evidence: "",
+  privacyNote: "",
+  sortOrder: 100,
+  visibility: "private",
+  readiness: "draft",
+};
+
 const state = {
   activeModule: "dashboard",
   opportunities: [],
@@ -332,6 +386,9 @@ const state = {
   projectAmmos: [],
   followUpQuestions: [],
   expressionDrills: [],
+  portfolioProfile: { ...EMPTY_PORTFOLIO_PROFILE },
+  portfolioProjects: [],
+  portfolioPreviewMode: false,
   selectedId: null,
   selectedInterviewId: null,
   selectedBriefId: null,
@@ -341,6 +398,7 @@ const state = {
   selectedProjectAmmoId: null,
   selectedFollowUpQuestionId: null,
   selectedExpressionDrillId: null,
+  selectedPortfolioProjectId: null,
   draft: null,
   interviewDraft: null,
   briefDraft: null,
@@ -350,6 +408,7 @@ const state = {
   projectAmmoDraft: null,
   followUpQuestionDraft: null,
   expressionDrillDraft: null,
+  portfolioProjectDraft: null,
   loading: true,
   saving: false,
   savingInterview: false,
@@ -360,6 +419,8 @@ const state = {
   savingProjectAmmo: false,
   savingFollowUpQuestion: false,
   savingExpressionDrill: false,
+  savingPortfolioProfile: false,
+  savingPortfolioProject: false,
 };
 
 const app = document.querySelector("#app");
@@ -425,6 +486,8 @@ async function loadData() {
       projectAmmosPayload,
       followUpQuestionsPayload,
       expressionDrillsPayload,
+      portfolioProfilePayload,
+      portfolioProjectsPayload,
     ] = await Promise.all([
       api("/api/opportunities"),
       api("/api/interviews"),
@@ -435,6 +498,8 @@ async function loadData() {
       api("/api/project-ammos"),
       api("/api/follow-up-questions"),
       api("/api/expression-drills"),
+      api("/api/portfolio-profile"),
+      api("/api/portfolio-projects"),
     ]);
     state.opportunities = opportunitiesPayload.opportunities || [];
     state.interviews = interviewsPayload.interviews || [];
@@ -445,6 +510,8 @@ async function loadData() {
     state.projectAmmos = projectAmmosPayload.projectAmmos || [];
     state.followUpQuestions = followUpQuestionsPayload.followUpQuestions || [];
     state.expressionDrills = expressionDrillsPayload.expressionDrills || [];
+    state.portfolioProfile = portfolioProfilePayload.profile || { ...EMPTY_PORTFOLIO_PROFILE };
+    state.portfolioProjects = portfolioProjectsPayload.portfolioProjects || [];
     if (!state.selectedId && state.opportunities.length) {
       state.selectedId = state.opportunities[0].id;
     }
@@ -477,6 +544,9 @@ async function loadData() {
       const drills = drillsForFollowUpQuestion(state.selectedFollowUpQuestionId);
       const stillSelected = drills.some((item) => item.id === state.selectedExpressionDrillId);
       state.selectedExpressionDrillId = stillSelected ? state.selectedExpressionDrillId : drills[0]?.id || null;
+    }
+    if (!state.selectedPortfolioProjectId && state.portfolioProjects.length) {
+      state.selectedPortfolioProjectId = state.portfolioProjects[0].id;
     }
   } catch (error) {
     showToast(error.message);
@@ -636,6 +706,27 @@ function selectedExpressionDrill() {
   return state.expressionDrills.find((item) => item.id === state.selectedExpressionDrillId) || null;
 }
 
+function selectedPortfolioProject() {
+  if (state.portfolioProjectDraft) return state.portfolioProjectDraft;
+  return state.portfolioProjects.find((item) => item.id === state.selectedPortfolioProjectId) || null;
+}
+
+function portfolioProjectsInPreview() {
+  return state.portfolioProjects
+    .filter((item) => item.visibility === "portfolio")
+    .sort((a, b) => (Number(a.sortOrder) || 100) - (Number(b.sortOrder) || 100));
+}
+
+function portfolioMetrics() {
+  const inPreview = portfolioProjectsInPreview();
+  return {
+    total: state.portfolioProjects.length,
+    inPreview: inPreview.length,
+    ready: state.portfolioProjects.filter((item) => item.readiness === "ready").length,
+    needsWork: state.portfolioProjects.filter((item) => item.readiness !== "ready").length,
+  };
+}
+
 function selectProjectAmmo(id) {
   state.selectedProjectAmmoId = id;
   state.projectAmmoDraft = null;
@@ -645,6 +736,42 @@ function selectProjectAmmo(id) {
   state.selectedExpressionDrillId = state.selectedFollowUpQuestionId
     ? drillsForFollowUpQuestion(state.selectedFollowUpQuestionId)[0]?.id || null
     : null;
+  render();
+}
+
+function selectPortfolioProject(id) {
+  state.selectedPortfolioProjectId = id;
+  state.portfolioProjectDraft = null;
+  render();
+}
+
+function beginPortfolioProjectFromAmmo(ammoId) {
+  const ammo = state.projectAmmos.find((item) => item.id === ammoId);
+  if (!ammo) {
+    showToast("没有找到项目弹药");
+    return;
+  }
+
+  state.activeModule = "portfolio";
+  state.portfolioPreviewMode = false;
+  state.portfolioProjectDraft = {
+    ...EMPTY_PORTFOLIO_PROJECT,
+    projectAmmoId: ammo.id,
+    projectName: ammo.projectName,
+    displayTitle: ammo.projectName,
+    subtitle: ammo.aiRelevance,
+    summary: ammo.result,
+    role: ammo.role,
+    period: ammo.period,
+    problem: ammo.background,
+    solution: ammo.actions,
+    impact: ammo.result,
+    metrics: ammo.metrics,
+    skills: ammo.pmCompetencies,
+    evidence: ammo.evidence,
+    sortOrder: state.portfolioProjects.length * 10 + 10,
+  };
+  state.selectedPortfolioProjectId = null;
   render();
 }
 
@@ -1390,6 +1517,16 @@ function attachCommonEvents() {
   document.querySelectorAll("[data-module-shortcut]").forEach((button) => {
     button.addEventListener("click", () => switchModule(button.dataset.moduleShortcut));
   });
+  document.querySelectorAll("[data-portfolio-project-id]").forEach((button) => {
+    button.addEventListener("click", () => selectPortfolioProject(button.dataset.portfolioProjectId));
+  });
+  document.querySelectorAll("[data-create-portfolio-project]").forEach((button) => {
+    button.addEventListener("click", () => beginPortfolioProjectFromAmmo(button.dataset.createPortfolioProject));
+  });
+  document.querySelector("#portfolio-preview-toggle")?.addEventListener("click", () => {
+    state.portfolioPreviewMode = !state.portfolioPreviewMode;
+    render();
+  });
   document.querySelector("#cancel-new-btn")?.addEventListener("click", () => {
     state.draft = null;
     state.selectedId = state.opportunities[0]?.id || null;
@@ -1510,6 +1647,11 @@ function attachCommonEvents() {
       : null;
     render();
   });
+  document.querySelector("#cancel-portfolio-project-btn")?.addEventListener("click", () => {
+    state.portfolioProjectDraft = null;
+    state.selectedPortfolioProjectId = state.portfolioProjects[0]?.id || null;
+    render();
+  });
   document.querySelector("#opportunity-form")?.addEventListener("submit", submitOpportunity);
   document.querySelector("#interview-form")?.addEventListener("submit", submitInterview);
   document.querySelector("#brief-form")?.addEventListener("submit", submitBrief);
@@ -1519,6 +1661,8 @@ function attachCommonEvents() {
   document.querySelector("#project-ammo-form")?.addEventListener("submit", submitProjectAmmo);
   document.querySelector("#follow-up-question-form")?.addEventListener("submit", submitFollowUpQuestion);
   document.querySelector("#expression-drill-form")?.addEventListener("submit", submitExpressionDrill);
+  document.querySelector("#portfolio-profile-form")?.addEventListener("submit", submitPortfolioProfile);
+  document.querySelector("#portfolio-project-form")?.addEventListener("submit", submitPortfolioProject);
 }
 
 function formToOpportunity(form) {
@@ -2070,6 +2214,106 @@ async function submitExpressionDrill(event) {
   }
 }
 
+function formToPortfolioProfile(form) {
+  const formData = new FormData(form);
+  return {
+    displayName: formData.get("displayName"),
+    headline: formData.get("headline"),
+    targetRole: formData.get("targetRole"),
+    location: formData.get("location"),
+    summary: formData.get("summary"),
+    coreSkills: formData.get("coreSkills"),
+    contactNote: formData.get("contactNote"),
+    portfolioStatus: formData.get("portfolioStatus"),
+    publishChecklist: formData.get("publishChecklist"),
+  };
+}
+
+async function submitPortfolioProfile(event) {
+  event.preventDefault();
+  if (state.savingPortfolioProfile) return;
+
+  const payload = formToPortfolioProfile(event.currentTarget);
+  state.portfolioProfile = { ...state.portfolioProfile, ...payload };
+  state.savingPortfolioProfile = true;
+  render();
+
+  try {
+    const result = await api("/api/portfolio-profile", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+    state.portfolioProfile = result.profile;
+    showToast("作品集资料已保存");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingPortfolioProfile = false;
+    render();
+  }
+}
+
+function formToPortfolioProject(form) {
+  const formData = new FormData(form);
+  return {
+    projectAmmoId: formData.get("projectAmmoId"),
+    projectName: formData.get("projectName"),
+    displayTitle: formData.get("displayTitle"),
+    subtitle: formData.get("subtitle"),
+    summary: formData.get("summary"),
+    role: formData.get("role"),
+    period: formData.get("period"),
+    problem: formData.get("problem"),
+    solution: formData.get("solution"),
+    impact: formData.get("impact"),
+    metrics: formData.get("metrics"),
+    skills: formData.get("skills"),
+    evidence: formData.get("evidence"),
+    privacyNote: formData.get("privacyNote"),
+    sortOrder: formData.get("sortOrder"),
+    visibility: formData.get("visibility"),
+    readiness: formData.get("readiness"),
+  };
+}
+
+async function submitPortfolioProject(event) {
+  event.preventDefault();
+  if (state.savingPortfolioProject) return;
+
+  const payload = formToPortfolioProject(event.currentTarget);
+  if (state.portfolioProjectDraft) {
+    state.portfolioProjectDraft = { ...state.portfolioProjectDraft, ...payload };
+  } else {
+    state.portfolioProjects = state.portfolioProjects.map((item) =>
+      item.id === state.selectedPortfolioProjectId ? { ...item, ...payload } : item,
+    );
+  }
+  state.savingPortfolioProject = true;
+  render();
+
+  try {
+    const isNew = Boolean(state.portfolioProjectDraft);
+    const path = isNew
+      ? "/api/portfolio-projects"
+      : `/api/portfolio-projects/${encodeURIComponent(state.selectedPortfolioProjectId)}`;
+    const method = isNew ? "POST" : "PUT";
+    const result = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    state.selectedPortfolioProjectId = result.portfolioProject.id;
+    state.portfolioProjectDraft = null;
+    showToast("作品集项目已保存");
+    const list = await api("/api/portfolio-projects");
+    state.portfolioProjects = list.portfolioProjects || [];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingPortfolioProject = false;
+    render();
+  }
+}
+
 function renderDashboard() {
   const topbar = renderTopbar(
     "总控台",
@@ -2098,6 +2342,7 @@ function renderDashboard() {
     .filter((item) => ["todo", "practicing", "reviewing"].includes(item.status) || item.score !== "stable")
     .slice(0, 6);
   const projectAmmo = projectAmmoMetrics();
+  const portfolio = portfolioMetrics();
 
   return `
     ${topbar}
@@ -2322,6 +2567,25 @@ function renderDashboard() {
                     .join("")
                 : `<div class="empty">暂无不稳定表达训练。</div>`
             }
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">作品集准备</h2>
+            <p class="panel-subtitle">未来公开展示前的项目卡和发布状态。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="work-list">
+            <button class="work-item" data-module-shortcut="portfolio" type="button">
+              <div>
+                <p class="work-item-title">预览项目：${portfolio.inPreview}</p>
+                <p class="work-item-meta">可展示：${portfolio.ready} · 待处理：${portfolio.needsWork} · ${optionLabel(PORTFOLIO_STATUSES, state.portfolioProfile?.portfolioStatus)}</p>
+              </div>
+              <span class="tag portfolio-${state.portfolioProfile?.portfolioStatus || "draft"}">进入作品集</span>
+            </button>
           </div>
         </div>
       </section>
@@ -3268,6 +3532,291 @@ function renderTrainingTaskForm(weakness) {
   `;
 }
 
+function renderPortfolio() {
+  const data = portfolioMetrics();
+
+  return `
+    ${renderTopbar("作品集产品线", "把成熟项目弹药整理成未来可公开展示的作品集素材。", "06 Portfolio Line")}
+    <section class="grid metrics compact-metrics">
+      <div class="metric"><div class="metric-label">项目卡总数</div><div class="metric-value">${data.total}</div></div>
+      <div class="metric"><div class="metric-label">进入预览</div><div class="metric-value">${data.inPreview}</div></div>
+      <div class="metric"><div class="metric-label">可展示</div><div class="metric-value">${data.ready}</div></div>
+      <div class="metric"><div class="metric-label">待处理</div><div class="metric-value">${data.needsWork}</div></div>
+    </section>
+    <div class="actions page-actions">
+      <button class="btn primary" id="portfolio-preview-toggle" type="button">${state.portfolioPreviewMode ? "返回工作台" : "本地预览"}</button>
+    </div>
+    ${state.portfolioPreviewMode ? renderPortfolioPreview() : renderPortfolioWorkspace()}
+  `;
+}
+
+function renderPortfolioWorkspace() {
+  return `
+    <div class="workspace">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">作品集资料</h2>
+            <p class="panel-subtitle">先把个人定位、核心能力和发布检查清单整理清楚。</p>
+          </div>
+        </div>
+        <div class="panel-body stack">
+          ${renderPortfolioProfileForm()}
+          ${renderPortfolioCandidateList()}
+        </div>
+      </section>
+      <div class="stack">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title">项目卡列表</h2>
+              <p class="panel-subtitle">从项目弹药生成，编辑为适合公开展示的版本。</p>
+            </div>
+          </div>
+          <div class="panel-body">${renderPortfolioProjectList()}</div>
+        </section>
+        ${renderPortfolioProjectDetail()}
+      </div>
+    </div>
+  `;
+}
+
+function renderPortfolioProfileForm() {
+  const profile = state.portfolioProfile || EMPTY_PORTFOLIO_PROFILE;
+
+  return `
+    <form id="portfolio-profile-form" class="form-grid compact-form">
+      <div class="form-field">
+        <label>展示名称</label>
+        <input name="displayName" value="${escapeHtml(profile.displayName)}" placeholder="你的名字 / 昵称" />
+      </div>
+      <div class="form-field">
+        <label>一句话定位</label>
+        <input name="headline" value="${escapeHtml(profile.headline)}" placeholder="AI Product Manager" />
+      </div>
+      <div class="form-field">
+        <label>目标岗位</label>
+        <input name="targetRole" value="${escapeHtml(profile.targetRole)}" placeholder="AI 产品经理" />
+      </div>
+      <div class="form-field">
+        <label>地点</label>
+        <input name="location" value="${escapeHtml(profile.location)}" placeholder="城市 / 远程 / 可搬迁" />
+      </div>
+      <div class="form-field">
+        <label>作品集状态</label>
+        ${renderSelect("portfolioStatus", PORTFOLIO_STATUSES, profile.portfolioStatus)}
+      </div>
+      ${renderBriefField("summary", "个人简介", profile.summary, "用 3-5 句话说明你的背景、方向和优势")}
+      ${renderBriefField("coreSkills", "核心能力", profile.coreSkills, "AI 产品设计、数据分析、用户研究、增长实验等")}
+      ${renderBriefField("contactNote", "联系方式说明", profile.contactNote, "先写占位，不必现在公开真实联系方式")}
+      ${renderBriefField("publishChecklist", "发布准备清单", profile.publishChecklist, "逐行记录公开前需要检查的事项")}
+      <div class="form-field full">
+        <div class="actions">
+          <button class="btn primary" type="submit">${state.savingPortfolioProfile ? "保存中..." : "保存作品集资料"}</button>
+        </div>
+        <div class="status-line">${profile.updatedAt ? `上次更新：${escapeHtml(profile.updatedAt)}` : "保存后会写入 content/portfolio/profile.md。"}</div>
+      </div>
+    </form>
+  `;
+}
+
+function renderPortfolioCandidateList() {
+  const existingAmmoIds = new Set(state.portfolioProjects.map((item) => item.projectAmmoId).filter(Boolean));
+  const candidates = state.projectAmmos
+    .filter((ammo) => ammo.status === "usable" || !existingAmmoIds.has(ammo.id))
+    .slice(0, 8);
+
+  return `
+    <div class="detail-divider"></div>
+    <div class="section-heading">
+      <div>
+        <h3>候选项目弹药</h3>
+        <p>优先从“可用于面试”的项目弹药生成作品集项目卡。</p>
+      </div>
+    </div>
+    <div class="work-list">
+      ${
+        candidates.length
+          ? candidates
+              .map(
+                (ammo) => `
+                  <button class="work-item" data-create-portfolio-project="${escapeHtml(ammo.id)}" type="button">
+                    <div>
+                      <p class="work-item-title">${escapeHtml(ammo.projectName)}</p>
+                      <p class="work-item-meta">${optionLabel(PROJECT_TYPES, ammo.projectType)}${existingAmmoIds.has(ammo.id) ? " · 已生成项目卡" : ""}</p>
+                    </div>
+                    <span class="tag project-${ammo.status}">${optionLabel(PROJECT_AMMO_STATUSES, ammo.status)}</span>
+                  </button>
+                `,
+              )
+              .join("")
+          : `<div class="empty">暂无项目弹药候选。先到项目弹药库把成熟项目标记为“可用于面试”。</div>`
+      }
+    </div>
+  `;
+}
+
+function renderPortfolioProjectList() {
+  if (!state.portfolioProjects.length) {
+    return `<div class="empty">还没有作品集项目卡。先从左侧候选项目弹药生成一张。</div>`;
+  }
+
+  return `
+    <div class="work-list">
+      ${state.portfolioProjects
+        .map(
+          (project) => `
+            <button class="work-item ${project.id === state.selectedPortfolioProjectId ? "active" : ""}" data-portfolio-project-id="${escapeHtml(project.id)}" type="button">
+              <div>
+                <p class="work-item-title">${escapeHtml(project.displayTitle)}</p>
+                <p class="work-item-meta">${optionLabel(PORTFOLIO_VISIBILITIES, project.visibility)} · 排序 ${escapeHtml(project.sortOrder)}</p>
+              </div>
+              <span class="tag portfolio-${project.readiness}">${optionLabel(PORTFOLIO_READINESS, project.readiness)}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderPortfolioProjectDetail() {
+  const project = selectedPortfolioProject();
+  const isNew = Boolean(state.portfolioProjectDraft);
+
+  if (!project) {
+    return `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">项目卡详情</h2>
+            <p class="panel-subtitle">选择一张项目卡，或从候选项目弹药生成。</p>
+          </div>
+        </div>
+        <div class="panel-body"><div class="empty">当前没有选中的作品集项目。</div></div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">${isNew ? "新增作品集项目" : "作品集项目详情"}</h2>
+          <p class="panel-subtitle">保存后会写入 content/portfolio-projects 下的 Markdown 文件。</p>
+        </div>
+      </div>
+      <div class="panel-body">
+        <form id="portfolio-project-form" class="form-grid compact-form">
+          <input type="hidden" name="projectAmmoId" value="${escapeHtml(project.projectAmmoId)}" />
+          <input type="hidden" name="projectName" value="${escapeHtml(project.projectName)}" />
+          <div class="form-field full">
+            <label>公开标题</label>
+            <input name="displayTitle" value="${escapeHtml(project.displayTitle)}" required />
+          </div>
+          <div class="form-field">
+            <label>副标题</label>
+            <input name="subtitle" value="${escapeHtml(project.subtitle)}" placeholder="项目方向 / 一句话价值" />
+          </div>
+          <div class="form-field">
+            <label>我的角色</label>
+            <input name="role" value="${escapeHtml(project.role)}" />
+          </div>
+          <div class="form-field">
+            <label>项目周期</label>
+            <input name="period" value="${escapeHtml(project.period)}" />
+          </div>
+          <div class="form-field">
+            <label>展示状态</label>
+            ${renderSelect("visibility", PORTFOLIO_VISIBILITIES, project.visibility)}
+          </div>
+          <div class="form-field">
+            <label>准备状态</label>
+            ${renderSelect("readiness", PORTFOLIO_READINESS, project.readiness)}
+          </div>
+          <div class="form-field">
+            <label>排序</label>
+            <input name="sortOrder" type="number" value="${escapeHtml(project.sortOrder)}" />
+          </div>
+          ${renderBriefField("summary", "项目摘要", project.summary, "对外展示时第一眼能看懂的项目价值")}
+          ${renderBriefField("problem", "问题与场景", project.problem, "为什么做这个项目，场景和用户问题是什么")}
+          ${renderBriefField("solution", "解决方案", project.solution, "你如何设计、推动和落地")}
+          ${renderBriefField("impact", "结果与影响", project.impact, "项目产出、业务影响、学习结论")}
+          ${renderBriefField("metrics", "指标", project.metrics, "可公开的量化结果、前后对比或验证数据")}
+          ${renderBriefField("skills", "能力标签", project.skills, "这个项目能证明哪些 AI PM 能力")}
+          ${renderBriefField("evidence", "证据", project.evidence, "PRD、原型、数据、截图、链接等可公开证据")}
+          ${renderBriefField("privacyNote", "脱敏与风险", project.privacyNote, "哪些内容需要隐藏、替换或谨慎表达")}
+          <div class="form-field full">
+            <div class="actions">
+              ${isNew ? `<button class="btn" id="cancel-portfolio-project-btn" type="button">取消</button>` : ""}
+              <button class="btn primary" type="submit">${state.savingPortfolioProject ? "保存中..." : "保存项目卡"}</button>
+            </div>
+            <div class="status-line">${project.updatedAt ? `上次更新：${escapeHtml(project.updatedAt)}` : "保存后会写入 content/portfolio-projects。"}</div>
+          </div>
+        </form>
+      </div>
+    </section>
+  `;
+}
+
+function renderPortfolioPreview() {
+  const profile = state.portfolioProfile || EMPTY_PORTFOLIO_PROFILE;
+  const projects = portfolioProjectsInPreview();
+
+  return `
+    <section class="portfolio-preview">
+      <div class="portfolio-hero">
+        <p class="eyebrow">Local Portfolio Preview</p>
+        <h1>${escapeHtml(profile.displayName || "你的名字")}</h1>
+        <p class="portfolio-headline">${escapeHtml(profile.headline || profile.targetRole || "AI Product Manager")}</p>
+        <p class="portfolio-summary">${escapeHtml(profile.summary || "这里会展示你的个人定位、核心能力和精选项目。")}</p>
+        <div class="tag-row">
+          ${(profile.coreSkills || "")
+            .split(/[、,\n]/)
+            .map((skill) => skill.trim())
+            .filter(Boolean)
+            .slice(0, 8)
+            .map((skill) => `<span class="tag stage">${escapeHtml(skill)}</span>`)
+            .join("")}
+        </div>
+      </div>
+      <div class="portfolio-preview-grid">
+        ${
+          projects.length
+            ? projects
+                .map(
+                  (project) => `
+                    <article class="portfolio-card">
+                      <div class="portfolio-card-header">
+                        <div>
+                          <p class="eyebrow">${escapeHtml(project.role || project.period || "Project")}</p>
+                          <h2>${escapeHtml(project.displayTitle)}</h2>
+                        </div>
+                        <span class="tag portfolio-${project.readiness}">${optionLabel(PORTFOLIO_READINESS, project.readiness)}</span>
+                      </div>
+                      <p class="portfolio-card-subtitle">${escapeHtml(project.subtitle)}</p>
+                      <p>${escapeHtml(project.summary)}</p>
+                      <dl class="portfolio-facts">
+                        <div><dt>问题</dt><dd>${escapeHtml(project.problem)}</dd></div>
+                        <div><dt>方案</dt><dd>${escapeHtml(project.solution)}</dd></div>
+                        <div><dt>结果</dt><dd>${escapeHtml(project.impact)}</dd></div>
+                      </dl>
+                      <p class="mini-meta">${escapeHtml(project.metrics || project.skills)}</p>
+                    </article>
+                  `,
+                )
+                .join("")
+            : `<div class="empty">还没有进入作品集预览的项目卡。把项目卡展示状态设为“进入作品集”后会显示在这里。</div>`
+        }
+      </div>
+      <section class="portfolio-contact">
+        <h2>联系与说明</h2>
+        <p>${escapeHtml(profile.contactNote || "这里先保留联系方式占位，公开前再补齐。")}</p>
+      </section>
+    </section>
+  `;
+}
+
 function render() {
   let content;
   if (state.activeModule === "dashboard") content = renderDashboard();
@@ -3276,6 +3825,7 @@ function render() {
   if (state.activeModule === "postInterview") content = renderPostInterview();
   if (state.activeModule === "weakness") content = renderWeakness();
   if (state.activeModule === "projectAmmo") content = renderProjectAmmo();
+  if (state.activeModule === "portfolio") content = renderPortfolio();
 
   renderShell(content);
   attachCommonEvents();

@@ -17,6 +17,9 @@ const TRAINING_TASKS_DIR = path.join(CONTENT_DIR, "training-tasks");
 const PROJECT_AMMOS_DIR = path.join(CONTENT_DIR, "project-ammos");
 const FOLLOW_UP_QUESTIONS_DIR = path.join(CONTENT_DIR, "follow-up-questions");
 const EXPRESSION_DRILLS_DIR = path.join(CONTENT_DIR, "expression-drills");
+const PORTFOLIO_DIR = path.join(CONTENT_DIR, "portfolio");
+const PORTFOLIO_PROJECTS_DIR = path.join(CONTENT_DIR, "portfolio-projects");
+const PORTFOLIO_PROFILE_ID = "portfolio_profile";
 
 const STAGES = new Set([
   "collected",
@@ -91,6 +94,9 @@ const EXPRESSION_DRILL_SOURCE_TYPES = new Set([
 ]);
 const EXPRESSION_DRILL_SCORES = new Set(["unstable", "usable", "stable"]);
 const EXPRESSION_DRILL_STATUSES = new Set(["todo", "practicing", "reviewing", "stable", "archived"]);
+const PORTFOLIO_STATUSES = new Set(["draft", "reviewing", "ready", "published_ready"]);
+const PORTFOLIO_VISIBILITIES = new Set(["private", "portfolio", "hidden"]);
+const PORTFOLIO_READINESS = new Set(["draft", "needs_sanitizing", "needs_evidence", "ready"]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -133,6 +139,8 @@ async function ensureContentDirs() {
   await mkdir(PROJECT_AMMOS_DIR, { recursive: true });
   await mkdir(FOLLOW_UP_QUESTIONS_DIR, { recursive: true });
   await mkdir(EXPRESSION_DRILLS_DIR, { recursive: true });
+  await mkdir(PORTFOLIO_DIR, { recursive: true });
+  await mkdir(PORTFOLIO_PROJECTS_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -207,6 +215,13 @@ function createExpressionDrillId(question) {
   return `drill_${stamp}_${seed}_${random}`;
 }
 
+function createPortfolioProjectId(title) {
+  const seed = slugify(title);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `pfproj_${stamp}_${seed}_${random}`;
+}
+
 function sanitizeId(id, prefix) {
   const value = String(id || "");
   const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
@@ -268,6 +283,16 @@ function expressionDrillPath(id) {
   const safeId = sanitizeId(id, "drill");
   if (!safeId) return null;
   return path.join(EXPRESSION_DRILLS_DIR, `${safeId}.md`);
+}
+
+function portfolioProfilePath() {
+  return path.join(PORTFOLIO_DIR, "profile.md");
+}
+
+function portfolioProjectPath(id) {
+  const safeId = sanitizeId(id, "pfproj");
+  if (!safeId) return null;
+  return path.join(PORTFOLIO_PROJECTS_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -676,6 +701,79 @@ function normalizeExpressionDrill(input, existing = {}) {
   };
 }
 
+function normalizePortfolioProfile(input = {}, existing = {}, options = {}) {
+  const now = new Date().toISOString();
+  const portfolioStatus = PORTFOLIO_STATUSES.has(input.portfolioStatus)
+    ? input.portfolioStatus
+    : existing.portfolioStatus || "draft";
+  const updatedAt = options.touch === false ? existing.updatedAt || input.updatedAt || now : now;
+
+  return {
+    id: PORTFOLIO_PROFILE_ID,
+    type: "portfolioProfile",
+    displayName: String(input.displayName ?? existing.displayName ?? "").trim(),
+    headline: String(input.headline ?? existing.headline ?? "").trim(),
+    targetRole: String(input.targetRole ?? existing.targetRole ?? "").trim(),
+    location: String(input.location ?? existing.location ?? "").trim(),
+    summary: String(input.summary ?? existing.summary ?? ""),
+    coreSkills: String(input.coreSkills ?? existing.coreSkills ?? ""),
+    contactNote: String(input.contactNote ?? existing.contactNote ?? ""),
+    portfolioStatus,
+    publishChecklist: String(input.publishChecklist ?? existing.publishChecklist ?? ""),
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt,
+  };
+}
+
+function normalizePortfolioProject(input, existing = {}, projectAmmo) {
+  const now = new Date().toISOString();
+  const projectAmmoId = String(input.projectAmmoId ?? existing.projectAmmoId ?? projectAmmo?.id ?? "").trim();
+  const projectName = String(
+    input.projectName ?? existing.projectName ?? projectAmmo?.projectName ?? "",
+  ).trim();
+  const displayTitle = String(
+    input.displayTitle ?? existing.displayTitle ?? projectAmmo?.projectName ?? projectName,
+  ).trim();
+
+  if (!projectName) {
+    throw new Error("projectName is required");
+  }
+  if (!displayTitle) {
+    throw new Error("displayTitle is required");
+  }
+
+  const visibility = PORTFOLIO_VISIBILITIES.has(input.visibility)
+    ? input.visibility
+    : existing.visibility || "private";
+  const readiness = PORTFOLIO_READINESS.has(input.readiness)
+    ? input.readiness
+    : existing.readiness || "draft";
+
+  return {
+    id: existing.id || input.id || createPortfolioProjectId(displayTitle),
+    type: "portfolioProject",
+    projectAmmoId,
+    projectName,
+    displayTitle,
+    subtitle: String(input.subtitle ?? existing.subtitle ?? projectAmmo?.aiRelevance ?? "").trim(),
+    summary: String(input.summary ?? existing.summary ?? projectAmmo?.result ?? ""),
+    role: String(input.role ?? existing.role ?? projectAmmo?.role ?? "").trim(),
+    period: String(input.period ?? existing.period ?? projectAmmo?.period ?? "").trim(),
+    problem: String(input.problem ?? existing.problem ?? projectAmmo?.background ?? ""),
+    solution: String(input.solution ?? existing.solution ?? projectAmmo?.actions ?? ""),
+    impact: String(input.impact ?? existing.impact ?? projectAmmo?.result ?? ""),
+    metrics: String(input.metrics ?? existing.metrics ?? projectAmmo?.metrics ?? ""),
+    skills: String(input.skills ?? existing.skills ?? projectAmmo?.pmCompetencies ?? ""),
+    evidence: String(input.evidence ?? existing.evidence ?? projectAmmo?.evidence ?? ""),
+    privacyNote: String(input.privacyNote ?? existing.privacyNote ?? ""),
+    sortOrder: Number(input.sortOrder ?? existing.sortOrder ?? 100) || 100,
+    visibility,
+    readiness,
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 function markdownEscapeTitle(value) {
   return String(value || "").replace(/\r?\n/g, " ").trim();
 }
@@ -750,6 +848,19 @@ function expressionDrillToMarkdown(drill) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 问题\n\n${drill.question}\n\n## 目标回答\n\n${drill.targetAnswer}\n\n## 练习记录\n\n${drill.practiceRecord}\n\n## 下一步动作\n\n${drill.nextAction}\n`;
 }
 
+function portfolioProfileToMarkdown(profile) {
+  const frontMatter = JSON.stringify(profile, null, 2);
+
+  return `---\n${frontMatter}\n---\n\n# 作品集个人资料\n\n## 个人简介\n\n${profile.summary}\n\n## 核心能力\n\n${profile.coreSkills}\n\n## 联系方式说明\n\n${profile.contactNote}\n\n## 发布检查清单\n\n${profile.publishChecklist}\n`;
+}
+
+function portfolioProjectToMarkdown(project) {
+  const frontMatter = JSON.stringify(project, null, 2);
+  const title = markdownEscapeTitle(project.displayTitle);
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 项目摘要\n\n${project.summary}\n\n## 问题与场景\n\n${project.problem}\n\n## 解决方案\n\n${project.solution}\n\n## 结果与影响\n\n${project.impact}\n\n## 指标\n\n${project.metrics}\n\n## 能力标签\n\n${project.skills}\n\n## 证据与风险\n\n${project.evidence}\n\n${project.privacyNote}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -808,6 +919,18 @@ async function readFollowUpQuestionFile(filePath) {
 }
 
 async function readExpressionDrillFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readPortfolioProfileFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readPortfolioProjectFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -1172,6 +1295,58 @@ async function listExpressionDrills(filters = {}) {
   return filtered;
 }
 
+async function getPortfolioProfile() {
+  await ensureContentDirs();
+  try {
+    const existing = await readPortfolioProfileFile(portfolioProfilePath());
+    return normalizePortfolioProfile({}, existing, { touch: false });
+  } catch (error) {
+    if (error.code === "ENOENT") return normalizePortfolioProfile({}, {}, { touch: false });
+    throw error;
+  }
+}
+
+async function listPortfolioProjects(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(PORTFOLIO_PROJECTS_DIR, { withFileTypes: true });
+  const projects = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readPortfolioProjectFile(path.join(PORTFOLIO_PROJECTS_DIR, entry.name));
+      if (item.type === "portfolioProject") {
+        projects.push(item);
+      }
+    } catch (error) {
+      projects.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "portfolioProject",
+        projectName: "读取失败",
+        displayTitle: "读取失败",
+        visibility: "private",
+        readiness: "needs_evidence",
+        sortOrder: 999,
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = projects.filter((project) => {
+    if (filters.visibility && project.visibility !== filters.visibility) return false;
+    if (filters.readiness && project.readiness !== filters.readiness) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const orderDiff = (Number(a.sortOrder) || 100) - (Number(b.sortOrder) || 100);
+    if (orderDiff) return orderDiff;
+    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  });
+  return filtered;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
@@ -1280,6 +1455,18 @@ async function getExpressionDrill(id) {
   }
 }
 
+async function getPortfolioProject(id) {
+  const filePath = portfolioProjectPath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readPortfolioProjectFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function saveOpportunity(opportunity) {
   await ensureContentDirs();
   const filePath = opportunityPath(opportunity.id);
@@ -1370,6 +1557,22 @@ async function saveExpressionDrill(drill) {
   return drill;
 }
 
+async function savePortfolioProfile(profile) {
+  await ensureContentDirs();
+  await writeFile(portfolioProfilePath(), portfolioProfileToMarkdown(profile), "utf8");
+  return profile;
+}
+
+async function savePortfolioProject(project) {
+  await ensureContentDirs();
+  const filePath = portfolioProjectPath(project.id);
+  if (!filePath) {
+    throw new Error("Invalid portfolio project id");
+  }
+  await writeFile(filePath, portfolioProjectToMarkdown(project), "utf8");
+  return project;
+}
+
 function briefStatusToPreparationStatus(status) {
   if (status === "ready") return "ready";
   if (status === "needs_rework") return "needs_rework";
@@ -1455,6 +1658,25 @@ async function syncExpressionDrillSource(drill) {
   );
   await saveFollowUpQuestion(nextQuestion);
   return nextQuestion;
+}
+
+async function portfolioPreviewData() {
+  const [profile, projects] = await Promise.all([
+    getPortfolioProfile(),
+    listPortfolioProjects({ visibility: "portfolio" }),
+  ]);
+  const readyCount = projects.filter((project) => project.readiness === "ready").length;
+
+  return {
+    profile,
+    projects,
+    stats: {
+      totalProjects: projects.length,
+      readyProjects: readyCount,
+      needsWork: projects.length - readyCount,
+      portfolioStatus: profile.portfolioStatus,
+    },
+  };
 }
 
 async function readRequestBody(req) {
@@ -1908,6 +2130,81 @@ async function handleApi(req, res, url) {
       await saveExpressionDrill(expressionDrill);
       const followUpQuestion = await syncExpressionDrillSource(expressionDrill);
       return sendJson(res, 200, { expressionDrill, followUpQuestion });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/portfolio-profile") {
+    if (req.method === "GET") {
+      const profile = await getPortfolioProfile();
+      return sendJson(res, 200, { profile });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getPortfolioProfile();
+      const body = await readRequestBody(req);
+      const profile = normalizePortfolioProfile(body, existing);
+      await savePortfolioProfile(profile);
+      return sendJson(res, 200, { profile });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/portfolio-projects") {
+    if (req.method === "GET") {
+      const visibility = url.searchParams.get("visibility") || "";
+      const readiness = url.searchParams.get("readiness") || "";
+      const portfolioProjects = await listPortfolioProjects({ visibility, readiness });
+      return sendJson(res, 200, { portfolioProjects });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const projectAmmo = body.projectAmmoId ? await getProjectAmmo(body.projectAmmoId) : null;
+      if (body.projectAmmoId && !projectAmmo) {
+        return sendJson(res, 400, { error: "Related project ammo not found" });
+      }
+      const portfolioProject = normalizePortfolioProject(body, {}, projectAmmo);
+      await savePortfolioProject(portfolioProject);
+      return sendJson(res, 201, { portfolioProject });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const portfolioProjectMatch = url.pathname.match(/^\/api\/portfolio-projects\/([^/]+)$/);
+  if (portfolioProjectMatch) {
+    const id = decodeURIComponent(portfolioProjectMatch[1]);
+
+    if (req.method === "GET") {
+      const portfolioProject = await getPortfolioProject(id);
+      if (!portfolioProject) return notFound(res);
+      return sendJson(res, 200, { portfolioProject });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getPortfolioProject(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      const projectAmmo = (body.projectAmmoId || existing.projectAmmoId)
+        ? await getProjectAmmo(body.projectAmmoId || existing.projectAmmoId)
+        : null;
+      if ((body.projectAmmoId || existing.projectAmmoId) && !projectAmmo) {
+        return sendJson(res, 400, { error: "Related project ammo not found" });
+      }
+      const portfolioProject = normalizePortfolioProject({ ...body, id }, existing, projectAmmo);
+      await savePortfolioProject(portfolioProject);
+      return sendJson(res, 200, { portfolioProject });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/portfolio-preview") {
+    if (req.method === "GET") {
+      return sendJson(res, 200, await portfolioPreviewData());
     }
 
     return methodNotAllowed(res);
