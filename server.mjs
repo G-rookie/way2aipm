@@ -12,6 +12,7 @@ const OPPORTUNITIES_DIR = path.join(CONTENT_DIR, "opportunities");
 const INTERVIEWS_DIR = path.join(CONTENT_DIR, "interviews");
 const PRE_INTERVIEW_BRIEFS_DIR = path.join(CONTENT_DIR, "pre-interview-briefs");
 const INTERVIEW_REVIEWS_DIR = path.join(CONTENT_DIR, "interview-reviews");
+const WEAKNESSES_DIR = path.join(CONTENT_DIR, "weaknesses");
 
 const STAGES = new Set([
   "collected",
@@ -34,6 +35,18 @@ const BRIEF_STATUSES = new Set(["draft", "ready", "needs_rework"]);
 const REVIEW_SELF_RATINGS = new Set(["great", "good", "mixed", "weak", "failed"]);
 const REVIEW_RESULTS = new Set(["unknown", "passed", "failed", "pending", "withdrawn"]);
 const REVIEW_STATUSES = new Set(["draft", "reviewed", "needs_followup"]);
+const WEAKNESS_CATEGORIES = new Set([
+  "project_depth",
+  "product_thinking",
+  "ai_understanding",
+  "business_sense",
+  "communication",
+  "case_analysis",
+  "motivation",
+  "other",
+]);
+const SEVERITIES = new Set(["low", "medium", "high"]);
+const WEAKNESS_STATUSES = new Set(["open", "training", "validating", "repaired", "archived"]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -71,6 +84,7 @@ async function ensureContentDirs() {
   await mkdir(INTERVIEWS_DIR, { recursive: true });
   await mkdir(PRE_INTERVIEW_BRIEFS_DIR, { recursive: true });
   await mkdir(INTERVIEW_REVIEWS_DIR, { recursive: true });
+  await mkdir(WEAKNESSES_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -110,6 +124,13 @@ function createReviewId(companyName, roundName) {
   return `review_${stamp}_${seed}_${random}`;
 }
 
+function createWeaknessId(title) {
+  const seed = slugify(title);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `weak_${stamp}_${seed}_${random}`;
+}
+
 function sanitizeId(id, prefix) {
   const value = String(id || "");
   const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
@@ -141,6 +162,12 @@ function reviewPath(id) {
   const safeId = sanitizeId(id, "review");
   if (!safeId) return null;
   return path.join(INTERVIEW_REVIEWS_DIR, `${safeId}.md`);
+}
+
+function weaknessPath(id) {
+  const safeId = sanitizeId(id, "weak");
+  if (!safeId) return null;
+  return path.join(WEAKNESSES_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -331,6 +358,65 @@ function normalizeReview(input, existing = {}, opportunity, interview) {
   };
 }
 
+function asArray(value, fallback = []) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return fallback;
+}
+
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function normalizeWeakness(input, existing = {}) {
+  const now = new Date().toISOString();
+  const title = String(input.title ?? existing.title ?? "").trim();
+
+  if (!title) {
+    throw new Error("title is required");
+  }
+
+  const category = WEAKNESS_CATEGORIES.has(input.category)
+    ? input.category
+    : existing.category || "other";
+  const severity = SEVERITIES.has(input.severity) ? input.severity : existing.severity || "medium";
+  const status = WEAKNESS_STATUSES.has(input.status) ? input.status : existing.status || "open";
+  const relatedReviewIds = unique([
+    ...asArray(existing.relatedReviewIds),
+    ...asArray(input.relatedReviewIds),
+    ...asArray(input.relatedReviewId),
+  ]);
+
+  return {
+    id: existing.id || input.id || createWeaknessId(title),
+    type: "weakness",
+    title,
+    category,
+    description: String(input.description ?? existing.description ?? ""),
+    evidence: String(input.evidence ?? existing.evidence ?? ""),
+    severity,
+    frequency: Number(input.frequency ?? existing.frequency ?? Math.max(1, relatedReviewIds.length)) || 1,
+    status,
+    relatedOpportunityIds: unique([
+      ...asArray(existing.relatedOpportunityIds),
+      ...asArray(input.relatedOpportunityIds),
+      ...asArray(input.relatedOpportunityId),
+    ]),
+    relatedInterviewRoundIds: unique([
+      ...asArray(existing.relatedInterviewRoundIds),
+      ...asArray(input.relatedInterviewRoundIds),
+      ...asArray(input.relatedInterviewRoundId),
+    ]),
+    relatedReviewIds,
+    linkedTrainingTaskIds: unique([
+      ...asArray(existing.linkedTrainingTaskIds),
+      ...asArray(input.linkedTrainingTaskIds),
+    ]),
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 function markdownEscapeTitle(value) {
   return String(value || "").replace(/\r?\n/g, " ").trim();
 }
@@ -370,6 +456,13 @@ function reviewToMarkdown(review) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 实际问题\n\n${review.actualQuestions}\n\n## 强回答\n\n${review.strongAnswers}\n\n## 弱回答\n\n${review.weakAnswers}\n\n## 挂点分析\n\n${review.failurePoints}\n\n## 面试官信号\n\n${review.interviewerSignals}\n\n## 总结\n\n${review.summary}\n`;
 }
 
+function weaknessToMarkdown(weakness) {
+  const frontMatter = JSON.stringify(weakness, null, 2);
+  const title = markdownEscapeTitle(weakness.title);
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 证据\n\n${weakness.evidence}\n\n## 缺陷描述\n\n${weakness.description}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -398,6 +491,12 @@ async function readBriefFile(filePath) {
 }
 
 async function readReviewFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readWeaknessFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -549,6 +648,47 @@ async function listReviews(filters = {}) {
   return filtered;
 }
 
+async function listWeaknesses(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(WEAKNESSES_DIR, { withFileTypes: true });
+  const weaknesses = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readWeaknessFile(path.join(WEAKNESSES_DIR, entry.name));
+      if (item.type === "weakness") {
+        weaknesses.push(item);
+      }
+    } catch (error) {
+      weaknesses.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "weakness",
+        title: "读取失败",
+        category: "other",
+        severity: "high",
+        status: "open",
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = weaknesses.filter((weakness) => {
+    if (filters.status && weakness.status !== filters.status) return false;
+    if (filters.category && weakness.category !== filters.category) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const severityOrder = { high: 0, medium: 1, low: 2 };
+    const severityDiff = (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3);
+    if (severityDiff) return severityDiff;
+    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  });
+  return filtered;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
@@ -597,6 +737,18 @@ async function getReview(id) {
   }
 }
 
+async function getWeakness(id) {
+  const filePath = weaknessPath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readWeaknessFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function saveOpportunity(opportunity) {
   await ensureContentDirs();
   const filePath = opportunityPath(opportunity.id);
@@ -637,6 +789,16 @@ async function saveReview(review) {
   return review;
 }
 
+async function saveWeakness(weakness) {
+  await ensureContentDirs();
+  const filePath = weaknessPath(weakness.id);
+  if (!filePath) {
+    throw new Error("Invalid weakness id");
+  }
+  await writeFile(filePath, weaknessToMarkdown(weakness), "utf8");
+  return weakness;
+}
+
 function briefStatusToPreparationStatus(status) {
   if (status === "ready") return "ready";
   if (status === "needs_rework") return "needs_rework";
@@ -664,6 +826,15 @@ async function syncInterviewReviewStatus(interview, reviewStatus) {
   const nextInterview = normalizeInterview({ ...interview, status: "reviewed" }, interview, opportunity);
   await saveInterview(nextInterview);
   return nextInterview;
+}
+
+async function linkWeaknessToReviews(weakness) {
+  for (const reviewId of weakness.relatedReviewIds || []) {
+    const review = await getReview(reviewId);
+    if (!review) continue;
+    const linkedWeaknessIds = unique([...(review.linkedWeaknessIds || []), weakness.id]);
+    await saveReview({ ...review, linkedWeaknessIds, updatedAt: new Date().toISOString() });
+  }
 }
 
 async function readRequestBody(req) {
@@ -879,6 +1050,48 @@ async function handleApi(req, res, url) {
       await saveReview(review);
       const updatedInterview = await syncInterviewReviewStatus(interview, review.status);
       return sendJson(res, 200, { review, interview: updatedInterview });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/weaknesses") {
+    if (req.method === "GET") {
+      const status = url.searchParams.get("status") || "";
+      const category = url.searchParams.get("category") || "";
+      const weaknesses = await listWeaknesses({ status, category });
+      return sendJson(res, 200, { weaknesses });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const weakness = normalizeWeakness(body);
+      await saveWeakness(weakness);
+      await linkWeaknessToReviews(weakness);
+      return sendJson(res, 201, { weakness });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const weaknessMatch = url.pathname.match(/^\/api\/weaknesses\/([^/]+)$/);
+  if (weaknessMatch) {
+    const id = decodeURIComponent(weaknessMatch[1]);
+
+    if (req.method === "GET") {
+      const weakness = await getWeakness(id);
+      if (!weakness) return notFound(res);
+      return sendJson(res, 200, { weakness });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getWeakness(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      const weakness = normalizeWeakness({ ...body, id }, existing);
+      await saveWeakness(weakness);
+      await linkWeaknessToReviews(weakness);
+      return sendJson(res, 200, { weakness });
     }
 
     return methodNotAllowed(res);

@@ -422,6 +422,42 @@ h1 {
   color: var(--red);
 }
 
+.tag.severity-high {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.tag.severity-medium {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.tag.severity-low {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.tag.weakness-open,
+.tag.weakness-training {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.tag.weakness-validating {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.tag.weakness-repaired {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.tag.weakness-archived {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
 .next-action {
   margin: 10px 0 0;
   color: var(--muted);
@@ -574,6 +610,17 @@ textarea:focus {
   color: var(--accent-ink);
 }
 
+.linked-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: #fbfaf5;
+}
+
 .compact-form textarea {
   min-height: 88px;
 }
@@ -592,6 +639,15 @@ textarea:focus {
   border-radius: var(--radius);
   padding: 12px;
   background: var(--surface);
+}
+
+.work-item.active {
+  border-color: var(--ink);
+  box-shadow: 0 8px 20px rgba(36, 31, 24, 0.07);
+}
+
+.weakness-item {
+  align-items: flex-start;
 }
 
 .work-item-title {

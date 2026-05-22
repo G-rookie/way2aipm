@@ -75,6 +75,31 @@ const REVIEW_STATUSES = [
   ["needs_followup", "需要追踪"],
 ];
 
+const WEAKNESS_CATEGORIES = [
+  ["project_depth", "项目深挖不足"],
+  ["product_thinking", "产品判断不足"],
+  ["ai_understanding", "AI 理解不足"],
+  ["business_sense", "业务理解不足"],
+  ["communication", "表达结构不稳"],
+  ["case_analysis", "案例分析不足"],
+  ["motivation", "动机与匹配度不足"],
+  ["other", "其他"],
+];
+
+const SEVERITIES = [
+  ["low", "低"],
+  ["medium", "中"],
+  ["high", "高"],
+];
+
+const WEAKNESS_STATUSES = [
+  ["open", "待处理"],
+  ["training", "训练中"],
+  ["validating", "验证中"],
+  ["repaired", "已修复"],
+  ["archived", "已归档"],
+];
+
 const MODULES = [
   ["dashboard", "总控台", "00"],
   ["pipeline", "求职中台", "01"],
@@ -148,25 +173,43 @@ const EMPTY_REVIEW = {
   status: "draft",
 };
 
+const EMPTY_WEAKNESS = {
+  title: "",
+  category: "other",
+  description: "",
+  evidence: "",
+  severity: "medium",
+  frequency: 1,
+  status: "open",
+  relatedOpportunityIds: [],
+  relatedInterviewRoundIds: [],
+  relatedReviewIds: [],
+  linkedTrainingTaskIds: [],
+};
+
 const state = {
   activeModule: "dashboard",
   opportunities: [],
   interviews: [],
   briefs: [],
   reviews: [],
+  weaknesses: [],
   selectedId: null,
   selectedInterviewId: null,
   selectedBriefId: null,
   selectedReviewId: null,
+  selectedWeaknessId: null,
   draft: null,
   interviewDraft: null,
   briefDraft: null,
   reviewDraft: null,
+  weaknessDraft: null,
   loading: true,
   saving: false,
   savingInterview: false,
   savingBrief: false,
   savingReview: false,
+  savingWeakness: false,
 };
 
 const app = document.querySelector("#app");
@@ -222,16 +265,18 @@ async function loadData() {
   state.loading = true;
   render();
   try {
-    const [opportunitiesPayload, interviewsPayload, briefsPayload, reviewsPayload] = await Promise.all([
+    const [opportunitiesPayload, interviewsPayload, briefsPayload, reviewsPayload, weaknessesPayload] = await Promise.all([
       api("/api/opportunities"),
       api("/api/interviews"),
       api("/api/pre-interview-briefs"),
       api("/api/interview-reviews"),
+      api("/api/weaknesses"),
     ]);
     state.opportunities = opportunitiesPayload.opportunities || [];
     state.interviews = interviewsPayload.interviews || [];
     state.briefs = briefsPayload.briefs || [];
     state.reviews = reviewsPayload.reviews || [];
+    state.weaknesses = weaknessesPayload.weaknesses || [];
     if (!state.selectedId && state.opportunities.length) {
       state.selectedId = state.opportunities[0].id;
     }
@@ -243,6 +288,9 @@ async function loadData() {
     }
     if (!state.selectedReviewId && state.selectedInterviewId) {
       state.selectedReviewId = reviewForInterview(state.selectedInterviewId)?.id || null;
+    }
+    if (!state.selectedWeaknessId && state.weaknesses.length) {
+      state.selectedWeaknessId = state.weaknesses[0].id;
     }
   } catch (error) {
     showToast(error.message);
@@ -306,6 +354,42 @@ function reviewForInterview(interviewRoundId) {
 function selectedReview() {
   if (state.reviewDraft) return state.reviewDraft;
   return state.reviews.find((item) => item.id === state.selectedReviewId) || null;
+}
+
+function selectedWeakness() {
+  if (state.weaknessDraft) return state.weaknessDraft;
+  return state.weaknesses.find((item) => item.id === state.selectedWeaknessId) || null;
+}
+
+function selectWeakness(id) {
+  state.selectedWeaknessId = id;
+  state.weaknessDraft = null;
+  render();
+}
+
+function beginNewWeakness(seed = {}) {
+  state.activeModule = "weakness";
+  state.weaknessDraft = { ...EMPTY_WEAKNESS, ...seed };
+  state.selectedWeaknessId = null;
+  render();
+}
+
+function beginWeaknessFromSelectedReview() {
+  const review = selectedReview();
+  if (!review?.id) {
+    showToast("请先保存一份复盘");
+    return;
+  }
+
+  beginNewWeakness({
+    title: review.failurePoints ? review.failurePoints.split(/\r?\n/)[0].slice(0, 42) : "来自面试复盘的能力缺陷",
+    description: review.failurePoints || review.weakAnswers || "",
+    evidence: review.weakAnswers || review.actualQuestions || "",
+    severity: review.selfRating === "failed" || review.selfRating === "weak" ? "high" : "medium",
+    relatedOpportunityIds: [review.opportunityId],
+    relatedInterviewRoundIds: [review.interviewRoundId],
+    relatedReviewIds: [review.id],
+  });
 }
 
 function beginNewOpportunity() {
@@ -465,6 +549,15 @@ function reviewMetrics() {
     total: state.reviews.length,
     needsReview,
     followup: state.reviews.filter((review) => review.status === "needs_followup").length,
+  };
+}
+
+function weaknessMetrics() {
+  return {
+    total: state.weaknesses.length,
+    open: state.weaknesses.filter((weakness) => weakness.status === "open").length,
+    training: state.weaknesses.filter((weakness) => weakness.status === "training").length,
+    high: state.weaknesses.filter((weakness) => weakness.severity === "high").length,
   };
 }
 
@@ -842,6 +935,11 @@ function attachCommonEvents() {
   });
   document.querySelector("#create-brief-btn")?.addEventListener("click", beginBriefForSelectedInterview);
   document.querySelector("#create-review-btn")?.addEventListener("click", beginReviewForSelectedInterview);
+  document.querySelector("#create-weakness-from-review-btn")?.addEventListener("click", beginWeaknessFromSelectedReview);
+  document.querySelector("#new-weakness-btn")?.addEventListener("click", () => beginNewWeakness());
+  document.querySelectorAll("[data-weakness-id]").forEach((button) => {
+    button.addEventListener("click", () => selectWeakness(button.dataset.weaknessId));
+  });
   document.querySelector("#cancel-interview-btn")?.addEventListener("click", () => {
     state.interviewDraft = null;
     state.selectedInterviewId = interviewsForOpportunity(state.selectedId)[0]?.id || null;
@@ -857,10 +955,16 @@ function attachCommonEvents() {
     state.selectedReviewId = state.selectedInterviewId ? reviewForInterview(state.selectedInterviewId)?.id || null : null;
     render();
   });
+  document.querySelector("#cancel-weakness-btn")?.addEventListener("click", () => {
+    state.weaknessDraft = null;
+    state.selectedWeaknessId = state.weaknesses[0]?.id || null;
+    render();
+  });
   document.querySelector("#opportunity-form")?.addEventListener("submit", submitOpportunity);
   document.querySelector("#interview-form")?.addEventListener("submit", submitInterview);
   document.querySelector("#brief-form")?.addEventListener("submit", submitBrief);
   document.querySelector("#review-form")?.addEventListener("submit", submitReview);
+  document.querySelector("#weakness-form")?.addEventListener("submit", submitWeakness);
 }
 
 function formToOpportunity(form) {
@@ -1101,16 +1205,77 @@ async function submitReview(event) {
     state.selectedReviewId = result.review.id;
     state.reviewDraft = null;
     showToast("面试复盘已保存");
-    const [reviewList, interviewList] = await Promise.all([
+    const [reviewList, interviewList, weaknessList] = await Promise.all([
       api("/api/interview-reviews"),
       api("/api/interviews"),
+      api("/api/weaknesses"),
     ]);
     state.reviews = reviewList.reviews || [];
     state.interviews = interviewList.interviews || [];
+    state.weaknesses = weaknessList.weaknesses || [];
   } catch (error) {
     showToast(error.message);
   } finally {
     state.savingReview = false;
+    render();
+  }
+}
+
+function formToWeakness(form) {
+  const formData = new FormData(form);
+  const existing = selectedWeakness();
+  return {
+    title: formData.get("title"),
+    category: formData.get("category"),
+    description: formData.get("description"),
+    evidence: formData.get("evidence"),
+    severity: formData.get("severity"),
+    frequency: formData.get("frequency"),
+    status: formData.get("status"),
+    relatedOpportunityIds: existing?.relatedOpportunityIds || [],
+    relatedInterviewRoundIds: existing?.relatedInterviewRoundIds || [],
+    relatedReviewIds: existing?.relatedReviewIds || [],
+    linkedTrainingTaskIds: existing?.linkedTrainingTaskIds || [],
+  };
+}
+
+async function submitWeakness(event) {
+  event.preventDefault();
+  if (state.savingWeakness) return;
+
+  const form = event.currentTarget;
+  const payload = formToWeakness(form);
+  if (state.weaknessDraft) {
+    state.weaknessDraft = { ...state.weaknessDraft, ...payload };
+  } else {
+    state.weaknesses = state.weaknesses.map((item) =>
+      item.id === state.selectedWeaknessId ? { ...item, ...payload } : item,
+    );
+  }
+  state.savingWeakness = true;
+  render();
+
+  try {
+    const isNew = Boolean(state.weaknessDraft);
+    const path = isNew ? "/api/weaknesses" : `/api/weaknesses/${encodeURIComponent(state.selectedWeaknessId)}`;
+    const method = isNew ? "POST" : "PUT";
+    const result = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    state.selectedWeaknessId = result.weakness.id;
+    state.weaknessDraft = null;
+    showToast("能力缺陷已保存");
+    const [weaknessList, reviewList] = await Promise.all([
+      api("/api/weaknesses"),
+      api("/api/interview-reviews"),
+    ]);
+    state.weaknesses = weaknessList.weaknesses || [];
+    state.reviews = reviewList.reviews || [];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingWeakness = false;
     render();
   }
 }
@@ -1499,6 +1664,13 @@ function renderReviewForm(interview) {
           ${renderBriefField("summary", "总结", review.summary, "本轮最大的收获、风险和下一步动作")}
           <input name="opportunityId" type="hidden" value="${escapeHtml(interview.opportunityId)}" />
           <input name="interviewRoundId" type="hidden" value="${escapeHtml(interview.id)}" />
+          <div class="form-field full linked-panel">
+            <div>
+              <label>关联能力缺陷</label>
+              <p class="mini-meta">${(review.linkedWeaknessIds || []).length ? `已关联 ${(review.linkedWeaknessIds || []).length} 个缺陷` : "尚未关联能力缺陷"}</p>
+            </div>
+            <button class="btn" id="create-weakness-from-review-btn" type="button">从本轮复盘创建缺陷</button>
+          </div>
           <div class="form-field full">
             <div class="actions">
               ${isNew ? `<button class="btn" id="cancel-review-btn" type="button">取消</button>` : ""}
@@ -1513,19 +1685,125 @@ function renderReviewForm(interview) {
 }
 
 function renderWeakness() {
+  const data = weaknessMetrics();
+  const weakness = selectedWeakness();
   return `
     ${renderTopbar("缺陷与训练中心", "这里会承接复盘中的弱回答，沉淀成能力缺陷和训练任务。", "04 Weakness & Training")}
+    <section class="grid metrics compact-metrics">
+      <div class="metric"><div class="metric-label">缺陷总数</div><div class="metric-value">${data.total}</div></div>
+      <div class="metric"><div class="metric-label">待处理</div><div class="metric-value">${data.open}</div></div>
+      <div class="metric"><div class="metric-label">训练中</div><div class="metric-value">${data.training}</div></div>
+      <div class="metric"><div class="metric-label">高严重度</div><div class="metric-value">${data.high}</div></div>
+    </section>
+    <div class="workspace">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">能力缺陷列表</h2>
+            <p class="panel-subtitle">从复盘证据中沉淀，不靠模糊感觉。</p>
+          </div>
+          <button class="btn primary" id="new-weakness-btn" type="button">新增缺陷</button>
+        </div>
+        <div class="panel-body">${renderWeaknessList()}</div>
+      </section>
+      ${renderWeaknessDetail(weakness)}
+    </div>
+  `;
+}
+
+function renderWeaknessList() {
+  if (!state.weaknesses.length) {
+    return `<div class="empty">还没有能力缺陷。可以从面试复盘中创建，也可以手动新增。</div>`;
+  }
+
+  return `
+    <div class="work-list">
+      ${state.weaknesses
+        .map(
+          (weakness) => `
+            <button class="work-item weakness-item ${weakness.id === state.selectedWeaknessId ? "active" : ""}" data-weakness-id="${escapeHtml(weakness.id)}" type="button">
+              <div>
+                <p class="work-item-title">${escapeHtml(weakness.title)}</p>
+                <p class="work-item-meta">${optionLabel(WEAKNESS_CATEGORIES, weakness.category)} · 证据 ${(weakness.relatedReviewIds || []).length} 条</p>
+              </div>
+              <div class="tag-row">
+                <span class="tag severity-${weakness.severity}">${optionLabel(SEVERITIES, weakness.severity)}</span>
+                <span class="tag weakness-${weakness.status}">${optionLabel(WEAKNESS_STATUSES, weakness.status)}</span>
+              </div>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderWeaknessDetail(weakness) {
+  const isNew = Boolean(state.weaknessDraft);
+
+  if (!weakness) {
+    return `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">缺陷详情</h2>
+            <p class="panel-subtitle">选择一个缺陷，或新增第一条记录。</p>
+          </div>
+        </div>
+        <div class="panel-body"><div class="empty">当前没有选中的能力缺陷。</div></div>
+      </section>
+    `;
+  }
+
+  return `
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">能力修复闭环占位</h2>
-          <p class="panel-subtitle">先跑通 Pipeline，再把复盘结果流入这里。</p>
+          <h2 class="panel-title">${isNew ? "新增能力缺陷" : "能力缺陷详情"}</h2>
+          <p class="panel-subtitle">保存后会写入 content/weaknesses 下的 Markdown 文件。</p>
         </div>
       </div>
-      <div class="panel-body placeholder-grid">
-        <div class="placeholder-card"><h3>能力缺陷</h3><p>记录被真实面试反复暴露的问题和证据。</p></div>
-        <div class="placeholder-card"><h3>训练任务</h3><p>把缺陷变成有产物、有验收标准的练习。</p></div>
-        <div class="placeholder-card"><h3>下一轮验证</h3><p>在后续面试中验证缺陷是否真的被修复。</p></div>
+      <div class="panel-body">
+        <form id="weakness-form" class="form-grid">
+          <div class="form-field full">
+            <label>缺陷标题</label>
+            <input name="title" value="${escapeHtml(weakness.title)}" required />
+          </div>
+          <div class="form-field">
+            <label>缺陷类型</label>
+            ${renderSelect("category", WEAKNESS_CATEGORIES, weakness.category)}
+          </div>
+          <div class="form-field">
+            <label>严重程度</label>
+            ${renderSelect("severity", SEVERITIES, weakness.severity)}
+          </div>
+          <div class="form-field">
+            <label>修复状态</label>
+            ${renderSelect("status", WEAKNESS_STATUSES, weakness.status)}
+          </div>
+          <div class="form-field">
+            <label>出现频率</label>
+            <input name="frequency" type="number" min="1" value="${escapeHtml(weakness.frequency || 1)}" />
+          </div>
+          ${renderBriefField("evidence", "证据", weakness.evidence, "来自哪些真实问题、弱回答或面试信号")}
+          ${renderBriefField("description", "缺陷描述", weakness.description, "这个缺陷的根因是什么，为什么会影响面试表现")}
+          <div class="form-field full">
+            <div class="linked-panel">
+              <div>
+                <label>关联复盘</label>
+                <p class="mini-meta">${(weakness.relatedReviewIds || []).length ? `已关联 ${(weakness.relatedReviewIds || []).length} 条复盘证据` : "尚未关联复盘"}</p>
+              </div>
+              <span class="mini-meta">训练任务将在下一切片补齐</span>
+            </div>
+          </div>
+          <div class="form-field full">
+            <div class="actions">
+              ${isNew ? `<button class="btn" id="cancel-weakness-btn" type="button">取消</button>` : ""}
+              <button class="btn primary" type="submit">${state.savingWeakness ? "保存中..." : "保存能力缺陷"}</button>
+            </div>
+            <div class="status-line">${weakness.updatedAt ? `上次更新：${escapeHtml(weakness.updatedAt)}` : "保存后会写入 content/weaknesses。"}</div>
+          </div>
+        </form>
       </div>
     </section>
   `;
