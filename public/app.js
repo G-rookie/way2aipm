@@ -47,6 +47,12 @@ const PREPARATION_STATUSES = [
   ["needs_rework", "需要补强"],
 ];
 
+const BRIEF_STATUSES = [
+  ["draft", "草稿"],
+  ["ready", "已准备"],
+  ["needs_rework", "需要补强"],
+];
+
 const MODULES = [
   ["dashboard", "总控台", "00"],
   ["pipeline", "求职中台", "01"],
@@ -84,17 +90,38 @@ const EMPTY_INTERVIEW = {
   notes: "",
 };
 
+const EMPTY_BRIEF = {
+  opportunityId: "",
+  interviewRoundId: "",
+  companyResearch: "",
+  businessSummary: "",
+  productSummary: "",
+  jdRequirements: "",
+  hiddenExpectations: "",
+  matchingEvidence: "",
+  riskGaps: "",
+  projectMapping: "",
+  questionPredictions: "",
+  highRiskQuestions: "",
+  prepChecklist: "",
+  status: "draft",
+};
+
 const state = {
   activeModule: "dashboard",
   opportunities: [],
   interviews: [],
+  briefs: [],
   selectedId: null,
   selectedInterviewId: null,
+  selectedBriefId: null,
   draft: null,
   interviewDraft: null,
+  briefDraft: null,
   loading: true,
   saving: false,
   savingInterview: false,
+  savingBrief: false,
 };
 
 const app = document.querySelector("#app");
@@ -150,17 +177,22 @@ async function loadData() {
   state.loading = true;
   render();
   try {
-    const [opportunitiesPayload, interviewsPayload] = await Promise.all([
+    const [opportunitiesPayload, interviewsPayload, briefsPayload] = await Promise.all([
       api("/api/opportunities"),
       api("/api/interviews"),
+      api("/api/pre-interview-briefs"),
     ]);
     state.opportunities = opportunitiesPayload.opportunities || [];
     state.interviews = interviewsPayload.interviews || [];
+    state.briefs = briefsPayload.briefs || [];
     if (!state.selectedId && state.opportunities.length) {
       state.selectedId = state.opportunities[0].id;
     }
     if (!state.selectedInterviewId && state.selectedId) {
       state.selectedInterviewId = interviewsForOpportunity(state.selectedId)[0]?.id || null;
+    }
+    if (!state.selectedBriefId && state.selectedInterviewId) {
+      state.selectedBriefId = briefForInterview(state.selectedInterviewId)?.id || null;
     }
   } catch (error) {
     showToast(error.message);
@@ -199,6 +231,17 @@ function selectedInterview() {
   return state.interviews.find((item) => item.id === state.selectedInterviewId) || null;
 }
 
+function briefForInterview(interviewRoundId) {
+  return state.briefs
+    .filter((brief) => brief.interviewRoundId === interviewRoundId)
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0] || null;
+}
+
+function selectedBrief() {
+  if (state.briefDraft) return state.briefDraft;
+  return state.briefs.find((item) => item.id === state.selectedBriefId) || null;
+}
+
 function beginNewOpportunity() {
   state.activeModule = "pipeline";
   state.selectedId = null;
@@ -212,9 +255,11 @@ function selectOpportunity(id) {
   state.selectedId = id;
   state.draft = null;
   state.interviewDraft = null;
+  state.briefDraft = null;
   const currentInterview = state.interviews.find((item) => item.id === state.selectedInterviewId);
   if (currentInterview?.opportunityId !== id) {
     state.selectedInterviewId = interviewsForOpportunity(id)[0]?.id || null;
+    state.selectedBriefId = state.selectedInterviewId ? briefForInterview(state.selectedInterviewId)?.id || null : null;
   }
   render();
 }
@@ -239,6 +284,34 @@ function beginNewInterview() {
 function selectInterview(id) {
   state.selectedInterviewId = id;
   state.interviewDraft = null;
+  state.briefDraft = null;
+  state.selectedBriefId = briefForInterview(id)?.id || null;
+  render();
+}
+
+function selectInterviewForBrief(id) {
+  const interview = state.interviews.find((item) => item.id === id);
+  if (!interview) return;
+  state.selectedInterviewId = id;
+  state.selectedId = interview.opportunityId;
+  state.interviewDraft = null;
+  state.briefDraft = null;
+  state.selectedBriefId = briefForInterview(id)?.id || null;
+  render();
+}
+
+function beginBriefForSelectedInterview() {
+  const interview = selectedInterview();
+  if (!interview?.id) {
+    showToast("请先选择一轮面试");
+    return;
+  }
+  state.briefDraft = {
+    ...EMPTY_BRIEF,
+    opportunityId: interview.opportunityId,
+    interviewRoundId: interview.id,
+  };
+  state.selectedBriefId = null;
   render();
 }
 
@@ -632,13 +705,23 @@ function attachCommonEvents() {
   document.querySelectorAll("[data-interview-id]").forEach((button) => {
     button.addEventListener("click", () => selectInterview(button.dataset.interviewId));
   });
+  document.querySelector("#pre-interview-selector")?.addEventListener("change", (event) => {
+    selectInterviewForBrief(event.target.value);
+  });
+  document.querySelector("#create-brief-btn")?.addEventListener("click", beginBriefForSelectedInterview);
   document.querySelector("#cancel-interview-btn")?.addEventListener("click", () => {
     state.interviewDraft = null;
     state.selectedInterviewId = interviewsForOpportunity(state.selectedId)[0]?.id || null;
     render();
   });
+  document.querySelector("#cancel-brief-btn")?.addEventListener("click", () => {
+    state.briefDraft = null;
+    state.selectedBriefId = state.selectedInterviewId ? briefForInterview(state.selectedInterviewId)?.id || null : null;
+    render();
+  });
   document.querySelector("#opportunity-form")?.addEventListener("submit", submitOpportunity);
   document.querySelector("#interview-form")?.addEventListener("submit", submitInterview);
+  document.querySelector("#brief-form")?.addEventListener("submit", submitBrief);
 }
 
 function formToOpportunity(form) {
@@ -710,6 +793,8 @@ async function submitOpportunity(event) {
     ]);
     state.opportunities = opportunityList.opportunities || [];
     state.interviews = interviewList.interviews || [];
+    const briefList = await api("/api/pre-interview-briefs");
+    state.briefs = briefList.briefs || [];
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -745,12 +830,80 @@ async function submitInterview(event) {
     state.selectedInterviewId = result.interview.id;
     state.interviewDraft = null;
     showToast("面试轮次已保存");
-    const list = await api("/api/interviews");
-    state.interviews = list.interviews || [];
+    const [interviewList, briefList] = await Promise.all([
+      api("/api/interviews"),
+      api("/api/pre-interview-briefs"),
+    ]);
+    state.interviews = interviewList.interviews || [];
+    state.briefs = briefList.briefs || [];
   } catch (error) {
     showToast(error.message);
   } finally {
     state.savingInterview = false;
+    render();
+  }
+}
+
+function formToBrief(form) {
+  const formData = new FormData(form);
+  const interview = selectedInterview();
+  return {
+    opportunityId: formData.get("opportunityId") || interview?.opportunityId,
+    interviewRoundId: formData.get("interviewRoundId") || interview?.id,
+    companyResearch: formData.get("companyResearch"),
+    businessSummary: formData.get("businessSummary"),
+    productSummary: formData.get("productSummary"),
+    jdRequirements: formData.get("jdRequirements"),
+    hiddenExpectations: formData.get("hiddenExpectations"),
+    matchingEvidence: formData.get("matchingEvidence"),
+    riskGaps: formData.get("riskGaps"),
+    projectMapping: formData.get("projectMapping"),
+    questionPredictions: formData.get("questionPredictions"),
+    highRiskQuestions: formData.get("highRiskQuestions"),
+    prepChecklist: formData.get("prepChecklist"),
+    status: formData.get("status"),
+  };
+}
+
+async function submitBrief(event) {
+  event.preventDefault();
+  if (state.savingBrief) return;
+
+  const form = event.currentTarget;
+  const payload = formToBrief(form);
+  if (state.briefDraft) {
+    state.briefDraft = { ...state.briefDraft, ...payload };
+  } else {
+    state.briefs = state.briefs.map((item) =>
+      item.id === state.selectedBriefId ? { ...item, ...payload } : item,
+    );
+  }
+  state.savingBrief = true;
+  render();
+
+  try {
+    const isNew = Boolean(state.briefDraft);
+    const path = isNew
+      ? "/api/pre-interview-briefs"
+      : `/api/pre-interview-briefs/${encodeURIComponent(state.selectedBriefId)}`;
+    const method = isNew ? "POST" : "PUT";
+    const result = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    state.selectedBriefId = result.brief.id;
+    state.briefDraft = null;
+    showToast("作战 Brief 已保存");
+    const [briefList, interviewList] = await Promise.all([
+      api("/api/pre-interview-briefs"),
+      api("/api/interviews"),
+    ]);
+    state.briefs = briefList.briefs || [];
+    state.interviews = interviewList.interviews || [];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingBrief = false;
     render();
   }
 }
@@ -869,23 +1022,126 @@ function renderPipeline() {
   `;
 }
 
-function renderPreInterview() {
-  const opportunity = selectedOpportunity();
+function renderPreInterviewSelector() {
+  if (!state.interviews.length) {
+    return `<div class="empty">还没有面试轮次。先到求职中台为岗位创建一面、二面或 HR 面。</div>`;
+  }
+
   return `
-    ${renderTopbar("面试前作战室", "v0.1 先预留作战 Brief 结构，后续接入 JD 拆解、题目预测和项目映射。", "02 Pre-Interview Room")}
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">${opportunity ? `${escapeHtml(opportunity.companyName)} · ${escapeHtml(opportunity.roleTitle)}` : "未选择岗位"}</h2>
-          <p class="panel-subtitle">当前版本先从求职中台选择岗位，再逐步补齐准备内容。</p>
+          <h2 class="panel-title">选择面试轮次</h2>
+          <p class="panel-subtitle">作战 Brief 会绑定到具体一轮面试。</p>
         </div>
       </div>
-      <div class="panel-body placeholder-grid">
-        <div class="placeholder-card"><h3>公司与业务背景</h3><p>记录业务模式、产品形态、AI 相关信号和面试切入角度。</p></div>
-        <div class="placeholder-card"><h3>JD 拆解</h3><p>拆出显性要求、隐性期待、匹配证据和风险缺口。</p></div>
-        <div class="placeholder-card"><h3>高频问题预测</h3><p>围绕岗位职责、项目经历、AI 认知和业务判断准备回答结构。</p></div>
+      <div class="panel-body">
+        <select id="pre-interview-selector">
+          ${state.interviews
+            .map(
+              (interview) => `
+                <option value="${escapeHtml(interview.id)}" ${interview.id === state.selectedInterviewId ? "selected" : ""}>
+                  ${escapeHtml(interview.companyName)} · ${escapeHtml(interview.roleTitle)} · ${escapeHtml(interview.roundName)}
+                </option>
+              `,
+            )
+            .join("")}
+        </select>
       </div>
     </section>
+  `;
+}
+
+function renderBriefField(name, label, value, placeholder = "") {
+  return `
+    <div class="form-field full">
+      <label>${label}</label>
+      <textarea name="${name}" placeholder="${escapeHtml(placeholder)}">${escapeHtml(value)}</textarea>
+    </div>
+  `;
+}
+
+function renderBriefForm(interview) {
+  const brief = selectedBrief();
+  const opportunity = state.opportunities.find((item) => item.id === interview?.opportunityId);
+  const isNew = Boolean(state.briefDraft);
+
+  if (!interview) {
+    return `<div class="empty">请选择一轮面试。</div>`;
+  }
+
+  if (!brief) {
+    return `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">${escapeHtml(interview.companyName)} · ${escapeHtml(interview.roundName)}</h2>
+            <p class="panel-subtitle">还没有作战 Brief，先创建一份准备材料。</p>
+          </div>
+          <button class="btn primary" id="create-brief-btn" type="button">创建 Brief</button>
+        </div>
+        <div class="panel-body">
+          <div class="empty">创建后可以填写公司调研、JD 拆解、项目映射、高风险问题和准备清单。</div>
+        </div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="panel brief-panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">${escapeHtml(interview.companyName)} · ${escapeHtml(interview.roleTitle)}</h2>
+          <p class="panel-subtitle">${escapeHtml(interview.roundName)} · ${optionLabel(ROUND_TYPES, interview.roundType)}${interview.scheduledAt ? ` · ${escapeHtml(formatDateTime(interview.scheduledAt))}` : ""}</p>
+        </div>
+        <div class="tag-row">
+          <span class="tag prep-${interview.preparationStatus}">${optionLabel(PREPARATION_STATUSES, interview.preparationStatus)}</span>
+        </div>
+      </div>
+      <div class="panel-body">
+        <form id="brief-form" class="form-grid brief-form">
+          <div class="form-field">
+            <label>Brief 状态</label>
+            ${renderSelect("status", BRIEF_STATUSES, brief.status)}
+          </div>
+          <div class="form-field">
+            <label>关联岗位</label>
+            <input value="${escapeHtml(opportunity ? `${opportunity.companyName} · ${opportunity.roleTitle}` : interview.roleTitle)}" disabled />
+          </div>
+          ${renderBriefField("companyResearch", "公司调研", brief.companyResearch, "业务模式、融资/产品信号、近期动作、面试可切入点")}
+          ${renderBriefField("businessSummary", "业务与产品理解", brief.businessSummary, "这家公司解决什么问题，目标用户是谁，核心业务链路是什么")}
+          ${renderBriefField("productSummary", "产品理解", brief.productSummary, "产品形态、关键功能、AI 相关能力、可能的产品判断题")}
+          ${renderBriefField("jdRequirements", "JD 拆解", brief.jdRequirements, "显性要求、核心职责、能力关键词")}
+          ${renderBriefField("hiddenExpectations", "隐性期待", brief.hiddenExpectations, "JD 背后真正想筛什么能力")}
+          ${renderBriefField("matchingEvidence", "匹配证据", brief.matchingEvidence, "你的经历里哪些事实能证明匹配")}
+          ${renderBriefField("riskGaps", "风险缺口", brief.riskGaps, "哪些地方容易被追问或暴露短板")}
+          ${renderBriefField("projectMapping", "项目经历映射", brief.projectMapping, "把岗位要求映射到你的项目案例和表达素材")}
+          ${renderBriefField("questionPredictions", "高频问题预测", brief.questionPredictions, "面试官最可能问哪些问题")}
+          ${renderBriefField("highRiskQuestions", "高风险问题", brief.highRiskQuestions, "最容易翻车的问题，以及要补强的回答方向")}
+          ${renderBriefField("prepChecklist", "准备清单", brief.prepChecklist, "面试前必须完成的动作，可用 Markdown checklist")}
+          <input name="opportunityId" type="hidden" value="${escapeHtml(interview.opportunityId)}" />
+          <input name="interviewRoundId" type="hidden" value="${escapeHtml(interview.id)}" />
+          <div class="form-field full">
+            <div class="actions">
+              ${isNew ? `<button class="btn" id="cancel-brief-btn" type="button">取消</button>` : ""}
+              <button class="btn primary" type="submit">${state.savingBrief ? "保存中..." : "保存作战 Brief"}</button>
+            </div>
+            <div class="status-line">${brief.updatedAt ? `上次更新：${escapeHtml(brief.updatedAt)}` : "保存后会写入 content/pre-interview-briefs。"}</div>
+          </div>
+        </form>
+      </div>
+    </section>
+  `;
+}
+
+function renderPreInterview() {
+  const interview = selectedInterview();
+  return `
+    ${renderTopbar("面试前作战室", "围绕具体面试轮次完成公司调研、JD 拆解、项目映射、问题预测和准备清单。", "02 Pre-Interview Room")}
+    <div class="pre-interview-layout">
+      ${renderPreInterviewSelector()}
+      ${renderBriefForm(interview)}
+    </div>
   `;
 }
 

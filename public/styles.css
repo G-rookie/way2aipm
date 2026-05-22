@@ -592,6 +592,25 @@ textarea:focus {
   line-height: 1.65;
 }
 
+.pre-interview-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.32fr) minmax(0, 0.68fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.brief-panel textarea {
+  min-height: 126px;
+}
+
+.brief-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.brief-form .form-field.full textarea {
+  min-height: 132px;
+}
+
 .toast {
   position: fixed;
   right: 22px;
@@ -617,6 +636,7 @@ textarea:focus {
 @media (max-width: 1120px) {
   .workspace,
   .dashboard-workspace,
+  .pre-interview-layout,
   .placeholder-grid {
     grid-template-columns: 1fr;
   }

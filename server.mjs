@@ -10,6 +10,7 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const CONTENT_DIR = path.join(__dirname, "content");
 const OPPORTUNITIES_DIR = path.join(CONTENT_DIR, "opportunities");
 const INTERVIEWS_DIR = path.join(CONTENT_DIR, "interviews");
+const PRE_INTERVIEW_BRIEFS_DIR = path.join(CONTENT_DIR, "pre-interview-briefs");
 
 const STAGES = new Set([
   "collected",
@@ -28,6 +29,7 @@ const RISK_LEVELS = new Set(["unknown", "low", "medium", "high"]);
 const ROUND_TYPES = new Set(["first", "second", "third", "hr", "final", "other"]);
 const INTERVIEW_STATUSES = new Set(["scheduled", "preparing", "completed", "reviewed", "cancelled"]);
 const PREPARATION_STATUSES = new Set(["not_started", "drafting", "ready", "needs_rework"]);
+const BRIEF_STATUSES = new Set(["draft", "ready", "needs_rework"]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -63,6 +65,7 @@ function methodNotAllowed(res) {
 async function ensureContentDirs() {
   await mkdir(OPPORTUNITIES_DIR, { recursive: true });
   await mkdir(INTERVIEWS_DIR, { recursive: true });
+  await mkdir(PRE_INTERVIEW_BRIEFS_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -88,6 +91,13 @@ function createInterviewId(companyName, roundName) {
   return `int_${stamp}_${seed}_${random}`;
 }
 
+function createBriefId(companyName, roundName) {
+  const seed = slugify(`${companyName}-${roundName}-brief`);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `brief_${stamp}_${seed}_${random}`;
+}
+
 function sanitizeId(id, prefix) {
   const value = String(id || "");
   const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
@@ -107,6 +117,12 @@ function interviewPath(id) {
   const safeId = sanitizeId(id, "int");
   if (!safeId) return null;
   return path.join(INTERVIEWS_DIR, `${safeId}.md`);
+}
+
+function briefPath(id) {
+  const safeId = sanitizeId(id, "brief");
+  if (!safeId) return null;
+  return path.join(PRE_INTERVIEW_BRIEFS_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -200,6 +216,49 @@ function normalizeInterview(input, existing = {}, opportunity) {
   };
 }
 
+function normalizeBrief(input, existing = {}, opportunity, interview) {
+  const now = new Date().toISOString();
+  const opportunityId = String(
+    input.opportunityId ?? existing.opportunityId ?? opportunity?.id ?? interview?.opportunityId ?? "",
+  ).trim();
+  const interviewRoundId = String(
+    input.interviewRoundId ?? existing.interviewRoundId ?? interview?.id ?? "",
+  ).trim();
+
+  if (!opportunityId) {
+    throw new Error("opportunityId is required");
+  }
+  if (!interviewRoundId) {
+    throw new Error("interviewRoundId is required");
+  }
+
+  const status = BRIEF_STATUSES.has(input.status) ? input.status : existing.status || "draft";
+
+  return {
+    id:
+      existing.id ||
+      input.id ||
+      createBriefId(opportunity?.companyName || interview?.companyName || "interview", interview?.roundName || "brief"),
+    type: "preInterviewBrief",
+    opportunityId,
+    interviewRoundId,
+    companyResearch: String(input.companyResearch ?? existing.companyResearch ?? ""),
+    businessSummary: String(input.businessSummary ?? existing.businessSummary ?? ""),
+    productSummary: String(input.productSummary ?? existing.productSummary ?? ""),
+    jdRequirements: String(input.jdRequirements ?? existing.jdRequirements ?? ""),
+    hiddenExpectations: String(input.hiddenExpectations ?? existing.hiddenExpectations ?? ""),
+    matchingEvidence: String(input.matchingEvidence ?? existing.matchingEvidence ?? ""),
+    riskGaps: String(input.riskGaps ?? existing.riskGaps ?? ""),
+    projectMapping: String(input.projectMapping ?? existing.projectMapping ?? ""),
+    questionPredictions: String(input.questionPredictions ?? existing.questionPredictions ?? ""),
+    highRiskQuestions: String(input.highRiskQuestions ?? existing.highRiskQuestions ?? ""),
+    prepChecklist: String(input.prepChecklist ?? existing.prepChecklist ?? ""),
+    status,
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 function markdownEscapeTitle(value) {
   return String(value || "").replace(/\r?\n/g, " ").trim();
 }
@@ -223,6 +282,15 @@ function interviewToMarkdown(interview) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 面试备注\n\n${notes}\n`;
 }
 
+function briefToMarkdown(brief, opportunity, interview) {
+  const frontMatter = JSON.stringify(brief, null, 2);
+  const title = markdownEscapeTitle(
+    `${opportunity?.companyName || interview?.companyName || "面试"} - ${interview?.roundName || "面试前作战 Brief"}`,
+  );
+
+  return `---\n${frontMatter}\n---\n\n# ${title} - 面试前作战 Brief\n\n## 公司调研\n\n${brief.companyResearch}\n\n## 业务与产品理解\n\n${brief.businessSummary}\n\n## 产品理解\n\n${brief.productSummary}\n\n## JD 拆解\n\n${brief.jdRequirements}\n\n## 隐性期待\n\n${brief.hiddenExpectations}\n\n## 匹配证据\n\n${brief.matchingEvidence}\n\n## 风险缺口\n\n${brief.riskGaps}\n\n## 项目经历映射\n\n${brief.projectMapping}\n\n## 高频问题预测\n\n${brief.questionPredictions}\n\n## 高风险问题\n\n${brief.highRiskQuestions}\n\n## 准备清单\n\n${brief.prepChecklist}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -239,6 +307,12 @@ async function readOpportunityFile(filePath) {
 }
 
 async function readInterviewFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readBriefFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -317,6 +391,41 @@ async function listInterviews(filters = {}) {
   return filtered;
 }
 
+async function listBriefs(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(PRE_INTERVIEW_BRIEFS_DIR, { withFileTypes: true });
+  const briefs = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readBriefFile(path.join(PRE_INTERVIEW_BRIEFS_DIR, entry.name));
+      if (item.type === "preInterviewBrief") {
+        briefs.push(item);
+      }
+    } catch (error) {
+      briefs.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "preInterviewBrief",
+        opportunityId: "",
+        interviewRoundId: "",
+        status: "needs_rework",
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = briefs.filter((brief) => {
+    if (filters.opportunityId && brief.opportunityId !== filters.opportunityId) return false;
+    if (filters.interviewRoundId && brief.interviewRoundId !== filters.interviewRoundId) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  return filtered;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
@@ -341,6 +450,18 @@ async function getInterview(id) {
   }
 }
 
+async function getBrief(id) {
+  const filePath = briefPath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readBriefFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function saveOpportunity(opportunity) {
   await ensureContentDirs();
   const filePath = opportunityPath(opportunity.id);
@@ -359,6 +480,35 @@ async function saveInterview(interview) {
   }
   await writeFile(filePath, interviewToMarkdown(interview), "utf8");
   return interview;
+}
+
+async function saveBrief(brief, opportunity, interview) {
+  await ensureContentDirs();
+  const filePath = briefPath(brief.id);
+  if (!filePath) {
+    throw new Error("Invalid brief id");
+  }
+  await writeFile(filePath, briefToMarkdown(brief, opportunity, interview), "utf8");
+  return brief;
+}
+
+function briefStatusToPreparationStatus(status) {
+  if (status === "ready") return "ready";
+  if (status === "needs_rework") return "needs_rework";
+  return "drafting";
+}
+
+async function syncInterviewPreparationStatus(interview, briefStatus) {
+  const opportunity = await getOpportunity(interview.opportunityId);
+  if (!opportunity) return interview;
+
+  const nextInterview = normalizeInterview(
+    { ...interview, preparationStatus: briefStatusToPreparationStatus(briefStatus) },
+    interview,
+    opportunity,
+  );
+  await saveInterview(nextInterview);
+  return nextInterview;
 }
 
 async function readRequestBody(req) {
@@ -458,6 +608,64 @@ async function handleApi(req, res, url) {
       const interview = normalizeInterview({ ...body, id }, existing, opportunity);
       await saveInterview(interview);
       return sendJson(res, 200, { interview });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/pre-interview-briefs") {
+    if (req.method === "GET") {
+      const opportunityId = url.searchParams.get("opportunityId") || "";
+      const interviewRoundId = url.searchParams.get("interviewRoundId") || "";
+      const briefs = await listBriefs({ opportunityId, interviewRoundId });
+      return sendJson(res, 200, { briefs });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const opportunity = await getOpportunity(body.opportunityId);
+      const interview = await getInterview(body.interviewRoundId);
+      if (!opportunity) {
+        return sendJson(res, 400, { error: "Related opportunity not found" });
+      }
+      if (!interview) {
+        return sendJson(res, 400, { error: "Related interview not found" });
+      }
+      const brief = normalizeBrief(body, {}, opportunity, interview);
+      await saveBrief(brief, opportunity, interview);
+      const updatedInterview = await syncInterviewPreparationStatus(interview, brief.status);
+      return sendJson(res, 201, { brief, interview: updatedInterview });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const briefMatch = url.pathname.match(/^\/api\/pre-interview-briefs\/([^/]+)$/);
+  if (briefMatch) {
+    const id = decodeURIComponent(briefMatch[1]);
+
+    if (req.method === "GET") {
+      const brief = await getBrief(id);
+      if (!brief) return notFound(res);
+      return sendJson(res, 200, { brief });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getBrief(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      const opportunity = await getOpportunity(body.opportunityId || existing.opportunityId);
+      const interview = await getInterview(body.interviewRoundId || existing.interviewRoundId);
+      if (!opportunity) {
+        return sendJson(res, 400, { error: "Related opportunity not found" });
+      }
+      if (!interview) {
+        return sendJson(res, 400, { error: "Related interview not found" });
+      }
+      const brief = normalizeBrief({ ...body, id }, existing, opportunity, interview);
+      await saveBrief(brief, opportunity, interview);
+      const updatedInterview = await syncInterviewPreparationStatus(interview, brief.status);
+      return sendJson(res, 200, { brief, interview: updatedInterview });
     }
 
     return methodNotAllowed(res);
