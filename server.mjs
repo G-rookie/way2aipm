@@ -16,6 +16,7 @@ const WEAKNESSES_DIR = path.join(CONTENT_DIR, "weaknesses");
 const TRAINING_TASKS_DIR = path.join(CONTENT_DIR, "training-tasks");
 const PROJECT_AMMOS_DIR = path.join(CONTENT_DIR, "project-ammos");
 const FOLLOW_UP_QUESTIONS_DIR = path.join(CONTENT_DIR, "follow-up-questions");
+const EXPRESSION_DRILLS_DIR = path.join(CONTENT_DIR, "expression-drills");
 
 const STAGES = new Set([
   "collected",
@@ -82,6 +83,14 @@ const FOLLOW_UP_QUESTION_TYPES = new Set([
   "other",
 ]);
 const FOLLOW_UP_QUESTION_STATUSES = new Set(["unanswered", "drafted", "stable", "needs_drill"]);
+const EXPRESSION_DRILL_SOURCE_TYPES = new Set([
+  "follow_up_question",
+  "weakness",
+  "training_task",
+  "interview_review",
+]);
+const EXPRESSION_DRILL_SCORES = new Set(["unstable", "usable", "stable"]);
+const EXPRESSION_DRILL_STATUSES = new Set(["todo", "practicing", "reviewing", "stable", "archived"]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -123,6 +132,7 @@ async function ensureContentDirs() {
   await mkdir(TRAINING_TASKS_DIR, { recursive: true });
   await mkdir(PROJECT_AMMOS_DIR, { recursive: true });
   await mkdir(FOLLOW_UP_QUESTIONS_DIR, { recursive: true });
+  await mkdir(EXPRESSION_DRILLS_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -190,6 +200,13 @@ function createFollowUpQuestionId(question) {
   return `follow_${stamp}_${seed}_${random}`;
 }
 
+function createExpressionDrillId(question) {
+  const seed = slugify(question);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `drill_${stamp}_${seed}_${random}`;
+}
+
 function sanitizeId(id, prefix) {
   const value = String(id || "");
   const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
@@ -245,6 +262,12 @@ function followUpQuestionPath(id) {
   const safeId = sanitizeId(id, "follow");
   if (!safeId) return null;
   return path.join(FOLLOW_UP_QUESTIONS_DIR, `${safeId}.md`);
+}
+
+function expressionDrillPath(id) {
+  const safeId = sanitizeId(id, "drill");
+  if (!safeId) return null;
+  return path.join(EXPRESSION_DRILLS_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -618,6 +641,41 @@ function normalizeFollowUpQuestion(input, existing = {}, projectAmmo) {
   };
 }
 
+function normalizeExpressionDrill(input, existing = {}) {
+  const now = new Date().toISOString();
+  const sourceType = EXPRESSION_DRILL_SOURCE_TYPES.has(input.sourceType)
+    ? input.sourceType
+    : existing.sourceType || "follow_up_question";
+  const sourceId = String(input.sourceId ?? existing.sourceId ?? "").trim();
+  const question = String(input.question ?? existing.question ?? "").trim();
+
+  if (!sourceId) {
+    throw new Error("sourceId is required");
+  }
+  if (!question) {
+    throw new Error("question is required");
+  }
+
+  const score = EXPRESSION_DRILL_SCORES.has(input.score) ? input.score : existing.score || "unstable";
+  const status = EXPRESSION_DRILL_STATUSES.has(input.status) ? input.status : existing.status || "todo";
+
+  return {
+    id: existing.id || input.id || createExpressionDrillId(question),
+    type: "expressionDrill",
+    sourceType,
+    sourceId,
+    question,
+    targetAnswer: String(input.targetAnswer ?? existing.targetAnswer ?? ""),
+    practiceRecord: String(input.practiceRecord ?? existing.practiceRecord ?? ""),
+    score,
+    status,
+    nextAction: String(input.nextAction ?? existing.nextAction ?? "").trim(),
+    linkedTrainingTaskId: String(input.linkedTrainingTaskId ?? existing.linkedTrainingTaskId ?? "").trim(),
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 function markdownEscapeTitle(value) {
   return String(value || "").replace(/\r?\n/g, " ").trim();
 }
@@ -685,6 +743,13 @@ function followUpQuestionToMarkdown(question) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 回答草稿\n\n${question.answerDraft}\n\n## 稳定回答\n\n${question.stableAnswer}\n\n## 证据\n\n${question.evidence}\n`;
 }
 
+function expressionDrillToMarkdown(drill) {
+  const frontMatter = JSON.stringify(drill, null, 2);
+  const title = markdownEscapeTitle(drill.question || "表达训练");
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 问题\n\n${drill.question}\n\n## 目标回答\n\n${drill.targetAnswer}\n\n## 练习记录\n\n${drill.practiceRecord}\n\n## 下一步动作\n\n${drill.nextAction}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -737,6 +802,12 @@ async function readProjectAmmoFile(filePath) {
 }
 
 async function readFollowUpQuestionFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readExpressionDrillFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -1055,6 +1126,52 @@ async function listFollowUpQuestions(filters = {}) {
   return filtered;
 }
 
+async function listExpressionDrills(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(EXPRESSION_DRILLS_DIR, { withFileTypes: true });
+  const drills = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readExpressionDrillFile(path.join(EXPRESSION_DRILLS_DIR, entry.name));
+      if (item.type === "expressionDrill") {
+        drills.push(item);
+      }
+    } catch (error) {
+      drills.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "expressionDrill",
+        sourceType: "follow_up_question",
+        sourceId: "",
+        question: "读取失败",
+        score: "unstable",
+        status: "todo",
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = drills.filter((drill) => {
+    if (filters.sourceType && drill.sourceType !== filters.sourceType) return false;
+    if (filters.sourceId && drill.sourceId !== filters.sourceId) return false;
+    if (filters.status && drill.status !== filters.status) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const statusOrder = { todo: 0, practicing: 1, reviewing: 2, stable: 3, archived: 4 };
+    const statusDiff = (statusOrder[a.status] ?? 5) - (statusOrder[b.status] ?? 5);
+    if (statusDiff) return statusDiff;
+    const scoreOrder = { unstable: 0, usable: 1, stable: 2 };
+    const scoreDiff = (scoreOrder[a.score] ?? 3) - (scoreOrder[b.score] ?? 3);
+    if (scoreDiff) return scoreDiff;
+    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  });
+  return filtered;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
@@ -1151,6 +1268,18 @@ async function getFollowUpQuestion(id) {
   }
 }
 
+async function getExpressionDrill(id) {
+  const filePath = expressionDrillPath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readExpressionDrillFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function saveOpportunity(opportunity) {
   await ensureContentDirs();
   const filePath = opportunityPath(opportunity.id);
@@ -1231,6 +1360,16 @@ async function saveFollowUpQuestion(question) {
   return question;
 }
 
+async function saveExpressionDrill(drill) {
+  await ensureContentDirs();
+  const filePath = expressionDrillPath(drill.id);
+  if (!filePath) {
+    throw new Error("Invalid expression drill id");
+  }
+  await writeFile(filePath, expressionDrillToMarkdown(drill), "utf8");
+  return drill;
+}
+
 function briefStatusToPreparationStatus(status) {
   if (status === "ready") return "ready";
   if (status === "needs_rework") return "needs_rework";
@@ -1285,6 +1424,37 @@ async function linkTaskToWeakness(task) {
   const nextWeakness = normalizeWeakness({ ...weakness, linkedTrainingTaskIds, status }, weakness);
   await saveWeakness(nextWeakness);
   return nextWeakness;
+}
+
+async function getExpressionDrillSource(sourceType, sourceId) {
+  if (sourceType === "follow_up_question") return getFollowUpQuestion(sourceId);
+  if (sourceType === "weakness") return getWeakness(sourceId);
+  if (sourceType === "training_task") return getTrainingTask(sourceId);
+  if (sourceType === "interview_review") return getReview(sourceId);
+  return null;
+}
+
+async function syncExpressionDrillSource(drill) {
+  if (drill.sourceType !== "follow_up_question" || drill.status !== "stable") {
+    return null;
+  }
+
+  const question = await getFollowUpQuestion(drill.sourceId);
+  if (!question) return null;
+  const projectAmmo = await getProjectAmmo(question.projectAmmoId);
+  if (!projectAmmo) return null;
+
+  const nextQuestion = normalizeFollowUpQuestion(
+    {
+      ...question,
+      status: "stable",
+      stableAnswer: drill.targetAnswer || question.stableAnswer,
+    },
+    question,
+    projectAmmo,
+  );
+  await saveFollowUpQuestion(nextQuestion);
+  return nextQuestion;
 }
 
 async function readRequestBody(req) {
@@ -1680,6 +1850,64 @@ async function handleApi(req, res, url) {
       const followUpQuestion = normalizeFollowUpQuestion({ ...body, id }, existing, projectAmmo);
       await saveFollowUpQuestion(followUpQuestion);
       return sendJson(res, 200, { followUpQuestion });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/expression-drills") {
+    if (req.method === "GET") {
+      const sourceType = url.searchParams.get("sourceType") || "";
+      const sourceId = url.searchParams.get("sourceId") || "";
+      const status = url.searchParams.get("status") || "";
+      const expressionDrills = await listExpressionDrills({ sourceType, sourceId, status });
+      return sendJson(res, 200, { expressionDrills });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const sourceType = EXPRESSION_DRILL_SOURCE_TYPES.has(body.sourceType)
+        ? body.sourceType
+        : "follow_up_question";
+      const source = await getExpressionDrillSource(sourceType, body.sourceId);
+      if (!source) {
+        return sendJson(res, 400, { error: "Related expression source not found" });
+      }
+      const expressionDrill = normalizeExpressionDrill({ ...body, sourceType });
+      await saveExpressionDrill(expressionDrill);
+      const followUpQuestion = await syncExpressionDrillSource(expressionDrill);
+      return sendJson(res, 201, { expressionDrill, followUpQuestion });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const expressionDrillMatch = url.pathname.match(/^\/api\/expression-drills\/([^/]+)$/);
+  if (expressionDrillMatch) {
+    const id = decodeURIComponent(expressionDrillMatch[1]);
+
+    if (req.method === "GET") {
+      const expressionDrill = await getExpressionDrill(id);
+      if (!expressionDrill) return notFound(res);
+      return sendJson(res, 200, { expressionDrill });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getExpressionDrill(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      const sourceType = EXPRESSION_DRILL_SOURCE_TYPES.has(body.sourceType)
+        ? body.sourceType
+        : existing.sourceType;
+      const sourceId = body.sourceId || existing.sourceId;
+      const source = await getExpressionDrillSource(sourceType, sourceId);
+      if (!source) {
+        return sendJson(res, 400, { error: "Related expression source not found" });
+      }
+      const expressionDrill = normalizeExpressionDrill({ ...body, id, sourceType, sourceId }, existing);
+      await saveExpressionDrill(expressionDrill);
+      const followUpQuestion = await syncExpressionDrillSource(expressionDrill);
+      return sendJson(res, 200, { expressionDrill, followUpQuestion });
     }
 
     return methodNotAllowed(res);

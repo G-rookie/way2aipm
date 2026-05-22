@@ -155,6 +155,27 @@ const FOLLOW_UP_QUESTION_STATUSES = [
   ["needs_drill", "需要训练"],
 ];
 
+const EXPRESSION_DRILL_SOURCE_TYPES = [
+  ["follow_up_question", "项目追问"],
+  ["weakness", "能力缺陷"],
+  ["training_task", "训练任务"],
+  ["interview_review", "面试复盘"],
+];
+
+const EXPRESSION_DRILL_SCORES = [
+  ["unstable", "不稳定"],
+  ["usable", "可用"],
+  ["stable", "稳定"],
+];
+
+const EXPRESSION_DRILL_STATUSES = [
+  ["todo", "待练"],
+  ["practicing", "练习中"],
+  ["reviewing", "待复核"],
+  ["stable", "已稳定"],
+  ["archived", "已归档"],
+];
+
 const MODULES = [
   ["dashboard", "总控台", "00"],
   ["pipeline", "求职中台", "01"],
@@ -288,6 +309,18 @@ const EMPTY_FOLLOW_UP_QUESTION = {
   linkedWeaknessIds: [],
 };
 
+const EMPTY_EXPRESSION_DRILL = {
+  sourceType: "follow_up_question",
+  sourceId: "",
+  question: "",
+  targetAnswer: "",
+  practiceRecord: "",
+  score: "unstable",
+  status: "todo",
+  nextAction: "",
+  linkedTrainingTaskId: "",
+};
+
 const state = {
   activeModule: "dashboard",
   opportunities: [],
@@ -298,6 +331,7 @@ const state = {
   trainingTasks: [],
   projectAmmos: [],
   followUpQuestions: [],
+  expressionDrills: [],
   selectedId: null,
   selectedInterviewId: null,
   selectedBriefId: null,
@@ -306,6 +340,7 @@ const state = {
   selectedTrainingTaskId: null,
   selectedProjectAmmoId: null,
   selectedFollowUpQuestionId: null,
+  selectedExpressionDrillId: null,
   draft: null,
   interviewDraft: null,
   briefDraft: null,
@@ -314,6 +349,7 @@ const state = {
   trainingTaskDraft: null,
   projectAmmoDraft: null,
   followUpQuestionDraft: null,
+  expressionDrillDraft: null,
   loading: true,
   saving: false,
   savingInterview: false,
@@ -323,6 +359,7 @@ const state = {
   savingTrainingTask: false,
   savingProjectAmmo: false,
   savingFollowUpQuestion: false,
+  savingExpressionDrill: false,
 };
 
 const app = document.querySelector("#app");
@@ -387,6 +424,7 @@ async function loadData() {
       trainingTasksPayload,
       projectAmmosPayload,
       followUpQuestionsPayload,
+      expressionDrillsPayload,
     ] = await Promise.all([
       api("/api/opportunities"),
       api("/api/interviews"),
@@ -396,6 +434,7 @@ async function loadData() {
       api("/api/training-tasks"),
       api("/api/project-ammos"),
       api("/api/follow-up-questions"),
+      api("/api/expression-drills"),
     ]);
     state.opportunities = opportunitiesPayload.opportunities || [];
     state.interviews = interviewsPayload.interviews || [];
@@ -405,6 +444,7 @@ async function loadData() {
     state.trainingTasks = trainingTasksPayload.tasks || [];
     state.projectAmmos = projectAmmosPayload.projectAmmos || [];
     state.followUpQuestions = followUpQuestionsPayload.followUpQuestions || [];
+    state.expressionDrills = expressionDrillsPayload.expressionDrills || [];
     if (!state.selectedId && state.opportunities.length) {
       state.selectedId = state.opportunities[0].id;
     }
@@ -432,6 +472,11 @@ async function loadData() {
       state.selectedFollowUpQuestionId = stillSelected
         ? state.selectedFollowUpQuestionId
         : questions[0]?.id || null;
+    }
+    if (state.selectedFollowUpQuestionId) {
+      const drills = drillsForFollowUpQuestion(state.selectedFollowUpQuestionId);
+      const stillSelected = drills.some((item) => item.id === state.selectedExpressionDrillId);
+      state.selectedExpressionDrillId = stillSelected ? state.selectedExpressionDrillId : drills[0]?.id || null;
     }
   } catch (error) {
     showToast(error.message);
@@ -507,6 +552,11 @@ function selectWeakness(id) {
   state.weaknessDraft = null;
   state.trainingTaskDraft = null;
   state.selectedTrainingTaskId = tasksForWeakness(id)[0]?.id || null;
+  state.expressionDrillDraft = null;
+  state.selectedExpressionDrillId =
+    drillsForSource("weakness", id)[0]?.id ||
+    (state.selectedTrainingTaskId ? drillsForSource("training_task", state.selectedTrainingTaskId)[0]?.id : null) ||
+    null;
   render();
 }
 
@@ -516,6 +566,8 @@ function beginNewWeakness(seed = {}) {
   state.selectedWeaknessId = null;
   state.selectedTrainingTaskId = null;
   state.trainingTaskDraft = null;
+  state.expressionDrillDraft = null;
+  state.selectedExpressionDrillId = null;
   render();
 }
 
@@ -531,6 +583,8 @@ function selectedTrainingTask() {
 function selectTrainingTask(id) {
   state.selectedTrainingTaskId = id;
   state.trainingTaskDraft = null;
+  state.expressionDrillDraft = null;
+  state.selectedExpressionDrillId = drillsForSource("training_task", id)[0]?.id || null;
   render();
 }
 
@@ -569,17 +623,42 @@ function selectedFollowUpQuestion() {
   return state.followUpQuestions.find((item) => item.id === state.selectedFollowUpQuestionId) || null;
 }
 
+function drillsForSource(sourceType, sourceId) {
+  return state.expressionDrills.filter((item) => item.sourceType === sourceType && item.sourceId === sourceId);
+}
+
+function drillsForFollowUpQuestion(questionId) {
+  return drillsForSource("follow_up_question", questionId);
+}
+
+function selectedExpressionDrill() {
+  if (state.expressionDrillDraft) return state.expressionDrillDraft;
+  return state.expressionDrills.find((item) => item.id === state.selectedExpressionDrillId) || null;
+}
+
 function selectProjectAmmo(id) {
   state.selectedProjectAmmoId = id;
   state.projectAmmoDraft = null;
   state.followUpQuestionDraft = null;
+  state.expressionDrillDraft = null;
   state.selectedFollowUpQuestionId = questionsForProjectAmmo(id)[0]?.id || null;
+  state.selectedExpressionDrillId = state.selectedFollowUpQuestionId
+    ? drillsForFollowUpQuestion(state.selectedFollowUpQuestionId)[0]?.id || null
+    : null;
   render();
 }
 
 function selectFollowUpQuestion(id) {
   state.selectedFollowUpQuestionId = id;
   state.followUpQuestionDraft = null;
+  state.expressionDrillDraft = null;
+  state.selectedExpressionDrillId = drillsForFollowUpQuestion(id)[0]?.id || null;
+  render();
+}
+
+function selectExpressionDrill(id) {
+  state.selectedExpressionDrillId = id;
+  state.expressionDrillDraft = null;
   render();
 }
 
@@ -588,7 +667,9 @@ function beginNewProjectAmmo(seed = {}) {
   state.projectAmmoDraft = { ...EMPTY_PROJECT_AMMO, ...seed };
   state.selectedProjectAmmoId = null;
   state.followUpQuestionDraft = null;
+  state.expressionDrillDraft = null;
   state.selectedFollowUpQuestionId = null;
+  state.selectedExpressionDrillId = null;
   render();
 }
 
@@ -600,6 +681,60 @@ function beginNewFollowUpQuestion() {
   }
   state.followUpQuestionDraft = { ...EMPTY_FOLLOW_UP_QUESTION, projectAmmoId: ammo.id };
   state.selectedFollowUpQuestionId = null;
+  state.expressionDrillDraft = null;
+  state.selectedExpressionDrillId = null;
+  render();
+}
+
+function beginExpressionDrillForSelectedQuestion() {
+  const question = selectedFollowUpQuestion();
+  if (!question?.id || state.followUpQuestionDraft) {
+    showToast("请先保存项目追问，再创建表达训练");
+    return;
+  }
+  state.expressionDrillDraft = {
+    ...EMPTY_EXPRESSION_DRILL,
+    sourceType: "follow_up_question",
+    sourceId: question.id,
+    question: question.question,
+    targetAnswer: question.stableAnswer || question.answerDraft,
+  };
+  state.selectedExpressionDrillId = null;
+  render();
+}
+
+function beginExpressionDrillForSelectedWeakness() {
+  const weakness = selectedWeakness();
+  if (!weakness?.id || state.weaknessDraft) {
+    showToast("请先保存能力缺陷，再创建表达训练");
+    return;
+  }
+  state.expressionDrillDraft = {
+    ...EMPTY_EXPRESSION_DRILL,
+    sourceType: "weakness",
+    sourceId: weakness.id,
+    question: weakness.title,
+    targetAnswer: weakness.description,
+  };
+  state.selectedExpressionDrillId = null;
+  render();
+}
+
+function beginExpressionDrillForSelectedTrainingTask() {
+  const task = selectedTrainingTask();
+  if (!task?.id || state.trainingTaskDraft) {
+    showToast("请先保存训练任务，再创建表达训练");
+    return;
+  }
+  state.expressionDrillDraft = {
+    ...EMPTY_EXPRESSION_DRILL,
+    sourceType: "training_task",
+    sourceId: task.id,
+    question: task.title,
+    targetAnswer: task.practiceOutput || task.targetAbility,
+    linkedTrainingTaskId: task.id,
+  };
+  state.selectedExpressionDrillId = null;
   render();
 }
 
@@ -704,6 +839,70 @@ function openTrainingTask(taskId) {
   state.selectedTrainingTaskId = task.id;
   state.weaknessDraft = null;
   state.trainingTaskDraft = null;
+  render();
+}
+
+function openFollowUpQuestion(questionId) {
+  const question = state.followUpQuestions.find((item) => item.id === questionId);
+  if (!question) return;
+  state.activeModule = "projectAmmo";
+  state.selectedProjectAmmoId = question.projectAmmoId;
+  state.selectedFollowUpQuestionId = question.id;
+  state.selectedExpressionDrillId = drillsForFollowUpQuestion(question.id)[0]?.id || null;
+  state.projectAmmoDraft = null;
+  state.followUpQuestionDraft = null;
+  state.expressionDrillDraft = null;
+  render();
+}
+
+function openProjectAmmo(ammoId) {
+  const ammo = state.projectAmmos.find((item) => item.id === ammoId);
+  if (!ammo) return;
+  state.activeModule = "projectAmmo";
+  state.selectedProjectAmmoId = ammo.id;
+  state.selectedFollowUpQuestionId = questionsForProjectAmmo(ammo.id)[0]?.id || null;
+  state.selectedExpressionDrillId = state.selectedFollowUpQuestionId
+    ? drillsForFollowUpQuestion(state.selectedFollowUpQuestionId)[0]?.id || null
+    : null;
+  state.projectAmmoDraft = null;
+  state.followUpQuestionDraft = null;
+  state.expressionDrillDraft = null;
+  render();
+}
+
+function openExpressionDrill(drillId) {
+  const drill = state.expressionDrills.find((item) => item.id === drillId);
+  if (!drill) return;
+  if (drill.sourceType === "follow_up_question") {
+    const question = state.followUpQuestions.find((item) => item.id === drill.sourceId);
+    if (question) {
+      state.activeModule = "projectAmmo";
+      state.selectedProjectAmmoId = question.projectAmmoId;
+      state.selectedFollowUpQuestionId = question.id;
+    }
+  } else if (drill.sourceType === "weakness") {
+    state.activeModule = "weakness";
+    state.selectedWeaknessId = drill.sourceId;
+    state.selectedTrainingTaskId = tasksForWeakness(drill.sourceId)[0]?.id || null;
+  } else if (drill.sourceType === "training_task") {
+    const task = state.trainingTasks.find((item) => item.id === drill.sourceId);
+    if (task) {
+      state.activeModule = "weakness";
+      state.selectedWeaknessId = task.weaknessId;
+      state.selectedTrainingTaskId = task.id;
+    }
+  } else if (drill.sourceType === "interview_review") {
+    const review = state.reviews.find((item) => item.id === drill.sourceId);
+    if (review) {
+      state.activeModule = "postInterview";
+      state.selectedInterviewId = review.interviewRoundId;
+      state.selectedReviewId = review.id;
+    }
+  }
+  state.selectedExpressionDrillId = drill.id;
+  state.projectAmmoDraft = null;
+  state.followUpQuestionDraft = null;
+  state.expressionDrillDraft = null;
   render();
 }
 
@@ -1179,6 +1378,15 @@ function attachCommonEvents() {
   document.querySelectorAll("[data-dashboard-task-id]").forEach((button) => {
     button.addEventListener("click", () => openTrainingTask(button.dataset.dashboardTaskId));
   });
+  document.querySelectorAll("[data-dashboard-follow-up-id]").forEach((button) => {
+    button.addEventListener("click", () => openFollowUpQuestion(button.dataset.dashboardFollowUpId));
+  });
+  document.querySelectorAll("[data-dashboard-drill-id]").forEach((button) => {
+    button.addEventListener("click", () => openExpressionDrill(button.dataset.dashboardDrillId));
+  });
+  document.querySelectorAll("[data-brief-project-id]").forEach((button) => {
+    button.addEventListener("click", () => openProjectAmmo(button.dataset.briefProjectId));
+  });
   document.querySelectorAll("[data-module-shortcut]").forEach((button) => {
     button.addEventListener("click", () => switchModule(button.dataset.moduleShortcut));
   });
@@ -1226,6 +1434,18 @@ function attachCommonEvents() {
   document.querySelectorAll("[data-follow-up-question-id]").forEach((button) => {
     button.addEventListener("click", () => selectFollowUpQuestion(button.dataset.followUpQuestionId));
   });
+  document.querySelectorAll(".new-expression-drill-btn").forEach((button) => {
+    button.addEventListener("click", beginExpressionDrillForSelectedQuestion);
+  });
+  document.querySelectorAll(".new-weakness-expression-drill-btn").forEach((button) => {
+    button.addEventListener("click", beginExpressionDrillForSelectedWeakness);
+  });
+  document.querySelectorAll(".new-task-expression-drill-btn").forEach((button) => {
+    button.addEventListener("click", beginExpressionDrillForSelectedTrainingTask);
+  });
+  document.querySelectorAll("[data-expression-drill-id]").forEach((button) => {
+    button.addEventListener("click", () => selectExpressionDrill(button.dataset.expressionDrillId));
+  });
   document.querySelector("#cancel-interview-btn")?.addEventListener("click", () => {
     state.interviewDraft = null;
     state.selectedInterviewId = interviewsForOpportunity(state.selectedId)[0]?.id || null;
@@ -1244,26 +1464,49 @@ function attachCommonEvents() {
   document.querySelector("#cancel-weakness-btn")?.addEventListener("click", () => {
     state.weaknessDraft = null;
     state.selectedWeaknessId = state.weaknesses[0]?.id || null;
+    state.expressionDrillDraft = null;
+    state.selectedExpressionDrillId = state.selectedWeaknessId
+      ? drillsForSource("weakness", state.selectedWeaknessId)[0]?.id || null
+      : null;
     render();
   });
   document.querySelector("#cancel-training-task-btn")?.addEventListener("click", () => {
     state.trainingTaskDraft = null;
     state.selectedTrainingTaskId = state.selectedWeaknessId ? tasksForWeakness(state.selectedWeaknessId)[0]?.id || null : null;
+    state.expressionDrillDraft = null;
+    state.selectedExpressionDrillId = state.selectedTrainingTaskId
+      ? drillsForSource("training_task", state.selectedTrainingTaskId)[0]?.id || null
+      : null;
     render();
   });
   document.querySelector("#cancel-project-ammo-btn")?.addEventListener("click", () => {
     state.projectAmmoDraft = null;
     state.selectedProjectAmmoId = state.projectAmmos[0]?.id || null;
     state.followUpQuestionDraft = null;
+    state.expressionDrillDraft = null;
     state.selectedFollowUpQuestionId = state.selectedProjectAmmoId
       ? questionsForProjectAmmo(state.selectedProjectAmmoId)[0]?.id || null
+      : null;
+    state.selectedExpressionDrillId = state.selectedFollowUpQuestionId
+      ? drillsForFollowUpQuestion(state.selectedFollowUpQuestionId)[0]?.id || null
       : null;
     render();
   });
   document.querySelector("#cancel-follow-up-question-btn")?.addEventListener("click", () => {
     state.followUpQuestionDraft = null;
+    state.expressionDrillDraft = null;
     state.selectedFollowUpQuestionId = state.selectedProjectAmmoId
       ? questionsForProjectAmmo(state.selectedProjectAmmoId)[0]?.id || null
+      : null;
+    state.selectedExpressionDrillId = state.selectedFollowUpQuestionId
+      ? drillsForFollowUpQuestion(state.selectedFollowUpQuestionId)[0]?.id || null
+      : null;
+    render();
+  });
+  document.querySelector("#cancel-expression-drill-btn")?.addEventListener("click", () => {
+    state.expressionDrillDraft = null;
+    state.selectedExpressionDrillId = state.selectedFollowUpQuestionId
+      ? drillsForFollowUpQuestion(state.selectedFollowUpQuestionId)[0]?.id || null
       : null;
     render();
   });
@@ -1275,6 +1518,7 @@ function attachCommonEvents() {
   document.querySelector("#training-task-form")?.addEventListener("submit", submitTrainingTask);
   document.querySelector("#project-ammo-form")?.addEventListener("submit", submitProjectAmmo);
   document.querySelector("#follow-up-question-form")?.addEventListener("submit", submitFollowUpQuestion);
+  document.querySelector("#expression-drill-form")?.addEventListener("submit", submitExpressionDrill);
 }
 
 function formToOpportunity(form) {
@@ -1768,6 +2012,64 @@ async function submitFollowUpQuestion(event) {
   }
 }
 
+function formToExpressionDrill(form) {
+  const formData = new FormData(form);
+  return {
+    sourceType: formData.get("sourceType"),
+    sourceId: formData.get("sourceId"),
+    question: formData.get("question"),
+    targetAnswer: formData.get("targetAnswer"),
+    practiceRecord: formData.get("practiceRecord"),
+    score: formData.get("score"),
+    status: formData.get("status"),
+    nextAction: formData.get("nextAction"),
+    linkedTrainingTaskId: formData.get("linkedTrainingTaskId"),
+  };
+}
+
+async function submitExpressionDrill(event) {
+  event.preventDefault();
+  if (state.savingExpressionDrill) return;
+
+  const form = event.currentTarget;
+  const payload = formToExpressionDrill(form);
+  if (state.expressionDrillDraft) {
+    state.expressionDrillDraft = { ...state.expressionDrillDraft, ...payload };
+  } else {
+    state.expressionDrills = state.expressionDrills.map((item) =>
+      item.id === state.selectedExpressionDrillId ? { ...item, ...payload } : item,
+    );
+  }
+  state.savingExpressionDrill = true;
+  render();
+
+  try {
+    const isNew = Boolean(state.expressionDrillDraft);
+    const path = isNew
+      ? "/api/expression-drills"
+      : `/api/expression-drills/${encodeURIComponent(state.selectedExpressionDrillId)}`;
+    const method = isNew ? "POST" : "PUT";
+    const result = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    state.selectedExpressionDrillId = result.expressionDrill.id;
+    state.expressionDrillDraft = null;
+    showToast(result.followUpQuestion ? "表达训练已保存，追问已同步稳定" : "表达训练已保存");
+    const [drillList, questionList] = await Promise.all([
+      api("/api/expression-drills"),
+      api("/api/follow-up-questions"),
+    ]);
+    state.expressionDrills = drillList.expressionDrills || [];
+    state.followUpQuestions = questionList.followUpQuestions || [];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingExpressionDrill = false;
+    render();
+  }
+}
+
 function renderDashboard() {
   const topbar = renderTopbar(
     "总控台",
@@ -1788,6 +2090,12 @@ function renderDashboard() {
     .slice(0, 6);
   const activeTrainingTasks = state.trainingTasks
     .filter((item) => ["todo", "doing", "reviewing"].includes(item.status))
+    .slice(0, 6);
+  const pendingFollowUps = state.followUpQuestions
+    .filter((item) => ["needs_drill", "unanswered", "drafted"].includes(item.status))
+    .slice(0, 6);
+  const unstableDrills = state.expressionDrills
+    .filter((item) => ["todo", "practicing", "reviewing"].includes(item.status) || item.score !== "stable")
     .slice(0, 6);
   const projectAmmo = projectAmmoMetrics();
 
@@ -1959,6 +2267,64 @@ function renderDashboard() {
           </div>
         </div>
       </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">待稳定追问</h2>
+            <p class="panel-subtitle">还没有稳定回答的项目追问。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="work-list">
+            ${
+              pendingFollowUps.length
+                ? pendingFollowUps
+                    .map(
+                      (item) => `
+                        <button class="work-item" data-dashboard-follow-up-id="${escapeHtml(item.id)}" type="button">
+                          <div>
+                            <p class="work-item-title">${escapeHtml(item.question)}</p>
+                            <p class="work-item-meta">${optionLabel(FOLLOW_UP_QUESTION_TYPES, item.questionType)} · ${optionLabel(RISK_LEVELS, item.riskLevel)}</p>
+                          </div>
+                          <span class="tag follow-${item.status}">${optionLabel(FOLLOW_UP_QUESTION_STATUSES, item.status)}</span>
+                        </button>
+                      `,
+                    )
+                    .join("")
+                : `<div class="empty">暂无待稳定项目追问。</div>`
+            }
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">表达训练</h2>
+            <p class="panel-subtitle">待练、练习中、待复核或评分未稳定的表达训练。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="work-list">
+            ${
+              unstableDrills.length
+                ? unstableDrills
+                    .map(
+                      (item) => `
+                        <button class="work-item" data-dashboard-drill-id="${escapeHtml(item.id)}" type="button">
+                          <div>
+                            <p class="work-item-title">${escapeHtml(item.question)}</p>
+                            <p class="work-item-meta">${optionLabel(EXPRESSION_DRILL_SOURCE_TYPES, item.sourceType)} · ${optionLabel(EXPRESSION_DRILL_SCORES, item.score)}</p>
+                          </div>
+                          <span class="tag drill-${item.status}">${optionLabel(EXPRESSION_DRILL_STATUSES, item.status)}</span>
+                        </button>
+                      `,
+                    )
+                    .join("")
+                : `<div class="empty">暂无不稳定表达训练。</div>`
+            }
+          </div>
+        </div>
+      </section>
     </div>
   `;
 }
@@ -2117,6 +2483,44 @@ function renderPreInterview() {
       ${renderPreInterviewSelector()}
       ${renderBriefForm(interview)}
     </div>
+    ${renderBriefProjectCandidates()}
+  `;
+}
+
+function renderBriefProjectCandidates() {
+  const candidates = state.projectAmmos.filter((item) => item.status === "usable").slice(0, 6);
+
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">候选项目素材</h2>
+          <p class="panel-subtitle">项目弹药状态为“可用于面试”的素材，可以迁移到 Brief 的项目映射里。</p>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="work-list">
+          ${
+            candidates.length
+              ? candidates
+                  .map((ammo) => {
+                    const stableCount = questionsForProjectAmmo(ammo.id).filter((item) => item.status === "stable").length;
+                    return `
+                      <button class="work-item" data-brief-project-id="${escapeHtml(ammo.id)}" type="button">
+                        <div>
+                          <p class="work-item-title">${escapeHtml(ammo.projectName)}</p>
+                          <p class="work-item-meta">${optionLabel(PROJECT_TYPES, ammo.projectType)} · 稳定追问 ${stableCount} 条</p>
+                        </div>
+                        <span class="tag project-${ammo.status}">${optionLabel(PROJECT_AMMO_STATUSES, ammo.status)}</span>
+                      </button>
+                    `;
+                  })
+                  .join("")
+              : `<div class="empty">暂无可用于面试的项目素材。先到项目弹药库把成熟项目标记为“可用于面试”。</div>`
+          }
+        </div>
+      </div>
+    </section>
   `;
 }
 
@@ -2282,6 +2686,7 @@ function renderWeakness() {
       <div class="stack">
         ${renderWeaknessDetail(weakness)}
         ${renderTrainingTaskSection(weakness)}
+        ${renderWeaknessExpressionDrillSection(weakness)}
       </div>
     </div>
   `;
@@ -2531,6 +2936,7 @@ function renderFollowUpQuestionSection(ammo) {
       <div class="panel-body stack">
         ${renderFollowUpQuestionList(ammo.id)}
         ${renderFollowUpQuestionForm(ammo)}
+        ${renderExpressionDrillSection()}
       </div>
     </section>
   `;
@@ -2597,7 +3003,7 @@ function renderFollowUpQuestionForm(ammo) {
             <label>关联缺陷</label>
             <p class="mini-meta">${(question.linkedWeaknessIds || []).length ? `已关联 ${(question.linkedWeaknessIds || []).length} 个缺陷` : "后续可从缺陷或训练任务关联到追问"}</p>
           </div>
-          <span class="tag risk-${question.riskLevel}">${optionLabel(RISK_LEVELS, question.riskLevel)}</span>
+          <button class="btn new-expression-drill-btn" type="button">创建表达训练</button>
         </div>
       </div>
       <div class="form-field full">
@@ -2608,6 +3014,162 @@ function renderFollowUpQuestionForm(ammo) {
         <div class="status-line">${question.updatedAt ? `上次更新：${escapeHtml(question.updatedAt)}` : "保存后会写入 content/follow-up-questions。"}</div>
       </div>
     </form>
+  `;
+}
+
+function renderExpressionDrillSection() {
+  const question = selectedFollowUpQuestion();
+  if (!question || state.followUpQuestionDraft) {
+    return `<div class="empty">保存并选择追问后，可以为它创建表达训练。</div>`;
+  }
+
+  return `
+    <div class="detail-divider"></div>
+    <div class="section-heading">
+      <div>
+        <h3>表达训练</h3>
+        <p>针对当前追问记录目标回答、练习结果和稳定性评分。</p>
+      </div>
+      <button class="btn new-expression-drill-btn" type="button">新增训练</button>
+    </div>
+    ${renderExpressionDrillList(question.id)}
+    ${renderExpressionDrillForm(question)}
+  `;
+}
+
+function renderExpressionDrillList(questionId) {
+  return renderExpressionDrillListForSource("follow_up_question", questionId);
+}
+
+function renderExpressionDrillListForSource(sourceType, sourceId) {
+  const drills = drillsForSource(sourceType, sourceId);
+  if (!drills.length) {
+    return `<div class="empty">还没有表达训练。先创建一条训练记录，把回答从“知道怎么写”练到“稳定说出口”。</div>`;
+  }
+
+  return `
+    <div class="work-list">
+      ${drills
+        .map(
+          (drill) => `
+            <button class="work-item ${drill.id === state.selectedExpressionDrillId ? "active" : ""}" data-expression-drill-id="${escapeHtml(drill.id)}" type="button">
+              <div>
+                <p class="work-item-title">${escapeHtml(drill.question)}</p>
+                <p class="work-item-meta">${optionLabel(EXPRESSION_DRILL_SCORES, drill.score)}${drill.nextAction ? ` · ${escapeHtml(drill.nextAction)}` : ""}</p>
+              </div>
+              <span class="tag drill-${drill.status}">${optionLabel(EXPRESSION_DRILL_STATUSES, drill.status)}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderExpressionDrillForm(question) {
+  return renderExpressionDrillFormForSource("follow_up_question", question.id);
+}
+
+function renderExpressionDrillFormForSource(sourceType, sourceId) {
+  const drill = selectedExpressionDrill();
+  const isNew = Boolean(state.expressionDrillDraft);
+
+  if (!drill || drill.sourceType !== sourceType || drill.sourceId !== sourceId) {
+    return `<div class="empty">选择一条训练记录进行编辑，或从当前追问新增表达训练。</div>`;
+  }
+
+  return `
+    <form id="expression-drill-form" class="form-grid compact-form">
+      <input type="hidden" name="sourceType" value="${escapeHtml(drill.sourceType)}" />
+      <input type="hidden" name="sourceId" value="${escapeHtml(drill.sourceId)}" />
+      <div class="form-field full">
+        <label>训练问题</label>
+        <input name="question" value="${escapeHtml(drill.question)}" required />
+      </div>
+      <div class="form-field">
+        <label>稳定性评分</label>
+        ${renderSelect("score", EXPRESSION_DRILL_SCORES, drill.score)}
+      </div>
+      <div class="form-field">
+        <label>训练状态</label>
+        ${renderSelect("status", EXPRESSION_DRILL_STATUSES, drill.status)}
+      </div>
+      <div class="form-field">
+        <label>关联训练任务 ID</label>
+        <input name="linkedTrainingTaskId" value="${escapeHtml(drill.linkedTrainingTaskId)}" placeholder="可选：task_xxx" />
+      </div>
+      ${renderBriefField("targetAnswer", "目标回答", drill.targetAnswer, "练到可以稳定复述的回答版本")}
+      ${renderBriefField("practiceRecord", "练习记录", drill.practiceRecord, "记录本次练习卡点、修改、复核结果")}
+      ${renderBriefField("nextAction", "下一步动作", drill.nextAction, "下一次要继续补什么或验证什么")}
+      <div class="form-field full">
+        <div class="linked-panel">
+          <div>
+            <label>状态联动</label>
+            <p class="mini-meta">训练状态保存为“已稳定”时，会把当前项目追问同步为“表达稳定”。</p>
+          </div>
+          <span class="tag score-${drill.score}">${optionLabel(EXPRESSION_DRILL_SCORES, drill.score)}</span>
+        </div>
+      </div>
+      <div class="form-field full">
+        <div class="actions">
+          ${isNew ? `<button class="btn" id="cancel-expression-drill-btn" type="button">取消</button>` : ""}
+          <button class="btn primary" type="submit">${state.savingExpressionDrill ? "保存中..." : "保存表达训练"}</button>
+        </div>
+        <div class="status-line">${drill.updatedAt ? `上次更新：${escapeHtml(drill.updatedAt)}` : "保存后会写入 content/expression-drills。"}</div>
+      </div>
+    </form>
+  `;
+}
+
+function renderWeaknessExpressionDrillSection(weakness) {
+  if (!weakness?.id || state.weaknessDraft) {
+    return "";
+  }
+
+  const task = selectedTrainingTask();
+  const sourceType = selectedExpressionDrill()?.sourceType;
+  const sourceId = selectedExpressionDrill()?.sourceId;
+  const canShowForm =
+    (sourceType === "weakness" && sourceId === weakness.id) ||
+    (task?.id && sourceType === "training_task" && sourceId === task.id);
+
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">表达稳定性训练</h2>
+          <p class="panel-subtitle">可以直接围绕能力缺陷或当前训练任务创建表达训练。</p>
+        </div>
+        <div class="actions">
+          <button class="btn new-weakness-expression-drill-btn" type="button">从缺陷创建</button>
+          ${task?.id && !state.trainingTaskDraft ? `<button class="btn primary new-task-expression-drill-btn" type="button">从任务创建</button>` : ""}
+        </div>
+      </div>
+      <div class="panel-body stack">
+        <div class="section-heading">
+          <div>
+            <h3>缺陷相关训练</h3>
+            <p>围绕这个能力缺陷本身沉淀表达训练。</p>
+          </div>
+        </div>
+        ${renderExpressionDrillListForSource("weakness", weakness.id)}
+        ${
+          task?.id
+            ? `
+              <div class="detail-divider"></div>
+              <div class="section-heading">
+                <div>
+                  <h3>当前任务相关训练</h3>
+                  <p>围绕选中的训练任务沉淀表达训练。</p>
+                </div>
+              </div>
+              ${renderExpressionDrillListForSource("training_task", task.id)}
+            `
+            : ""
+        }
+        ${canShowForm ? renderExpressionDrillFormForSource(sourceType, sourceId) : `<div class="empty">选择一条表达训练，或从缺陷/任务创建新的训练记录。</div>`}
+      </div>
+    </section>
   `;
 }
 

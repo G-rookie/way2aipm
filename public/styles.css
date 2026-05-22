@@ -531,6 +531,42 @@ h1 {
   color: var(--yellow);
 }
 
+.tag.drill-todo {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.tag.drill-practicing,
+.tag.drill-reviewing {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.tag.drill-stable {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.tag.drill-archived {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.tag.score-unstable {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.tag.score-usable {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.tag.score-stable {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
 .next-action {
   margin: 10px 0 0;
   color: var(--muted);
