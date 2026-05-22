@@ -1,3 +1,5 @@
+const APP_VERSION = "v0.7";
+
 const STAGES = [
   ["collected", "已收集"],
   ["applied", "已投递"],
@@ -826,6 +828,54 @@ function openAiAnalysisNote(id) {
   selectAiAnalysisNote(id);
 }
 
+function openDispatchItem(id) {
+  const item = createDispatchQueue().find((entry) => entry.id === id);
+  if (!item) return;
+
+  if (item.module === "pipeline") {
+    state.activeModule = "pipeline";
+    selectOpportunity(item.targetId);
+    return;
+  }
+  if (item.module === "preInterview") {
+    openPreInterviewForInterview(item.targetId);
+    return;
+  }
+  if (item.module === "postInterview") {
+    openReviewForInterview(item.targetId);
+    return;
+  }
+  if (item.module === "weakness") {
+    openWeakness(item.targetId);
+    return;
+  }
+  if (item.module === "trainingTask") {
+    openTrainingTask(item.targetId);
+    return;
+  }
+  if (item.module === "projectAmmo") {
+    openProjectAmmo(item.targetId);
+    return;
+  }
+  if (item.module === "followUpQuestion") {
+    openFollowUpQuestion(item.targetId);
+    return;
+  }
+  if (item.module === "expressionDrill") {
+    openExpressionDrill(item.targetId);
+    return;
+  }
+  if (item.module === "portfolio") {
+    state.activeModule = "portfolio";
+    state.portfolioPreviewMode = false;
+    selectPortfolioProject(item.targetId);
+    return;
+  }
+  if (item.module === "aiAnalysis") {
+    openAiAnalysisNote(item.targetId);
+  }
+}
+
 function sourceOptionsForType(sourceType) {
   const maps = {
     opportunity: state.opportunities.map((item) => [item.id, `${item.companyName} - ${item.roleTitle}`]),
@@ -1249,6 +1299,281 @@ function projectAmmoMetrics() {
   };
 }
 
+function dateBucket(value) {
+  if (!value) return "none";
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return "none";
+  const due = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.round((due.getTime() - today.getTime()) / 86400000);
+  if (days < 0) return "overdue";
+  if (days === 0) return "today";
+  if (days <= 3) return "soon";
+  return "later";
+}
+
+function dueLabel(value) {
+  if (!value) return "";
+  const bucket = dateBucket(value);
+  const dateText = String(value).includes("T") ? formatDateTime(value) : value;
+  const suffixes = {
+    overdue: "已逾期",
+    today: "今天",
+    soon: "3 天内",
+    later: "计划中",
+  };
+  return `${dateText} · ${suffixes[bucket] || "计划中"}`;
+}
+
+function dispatchPriorityFromDue(defaultPriority, dueAt) {
+  const bucket = dateBucket(dueAt);
+  if (bucket === "overdue" || bucket === "today") return "critical";
+  if (bucket === "soon" && defaultPriority === "medium") return "high";
+  return defaultPriority;
+}
+
+function createDispatchItem(seed) {
+  return {
+    id: seed.id,
+    type: seed.type,
+    title: seed.title || "未命名事项",
+    meta: seed.meta || "",
+    module: seed.module,
+    targetId: seed.targetId || "",
+    priority: dispatchPriorityFromDue(seed.priority || "medium", seed.dueAt),
+    dueAt: seed.dueAt || "",
+    reason: seed.reason || "",
+    actionLabel: seed.actionLabel || "处理",
+  };
+}
+
+function createDispatchQueue() {
+  const items = [];
+  const reviewedInterviewIds = new Set(state.reviews.map((review) => review.interviewRoundId));
+  const existingPortfolioProjectAmmoIds = new Set(state.portfolioProjects.map((project) => project.projectAmmoId).filter(Boolean));
+
+  state.interviews
+    .filter((item) => !["completed", "reviewed", "cancelled"].includes(item.status))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `interview-prep-${item.id}`,
+          type: "interview-prep",
+          title: `${item.companyName} · ${item.roundName}`,
+          meta: `${item.roleTitle} · ${optionLabel(ROUND_TYPES, item.roundType)}`,
+          module: "preInterview",
+          targetId: item.id,
+          dueAt: item.scheduledAt,
+          priority: item.preparationStatus === "needs_rework" ? "high" : "medium",
+          reason: `准备状态：${optionLabel(PREPARATION_STATUSES, item.preparationStatus)}`,
+          actionLabel: "进入作战室",
+        }),
+      );
+    });
+
+  state.interviews
+    .filter((item) => item.status === "completed" && !reviewedInterviewIds.has(item.id))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `interview-review-${item.id}`,
+          type: "interview-review",
+          title: `${item.companyName} · ${item.roundName}`,
+          meta: `${item.roleTitle} · 面试后复盘`,
+          module: "postInterview",
+          targetId: item.id,
+          priority: "critical",
+          reason: "已完成面试但还没有复盘记录",
+          actionLabel: "去复盘",
+        }),
+      );
+    });
+
+  state.opportunities
+    .filter((item) => item.riskLevel === "high")
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `opportunity-risk-${item.id}`,
+          type: "opportunity-risk",
+          title: `${item.companyName} · ${item.roleTitle}`,
+          meta: `阶段：${optionLabel(STAGES, item.stage)}`,
+          module: "pipeline",
+          targetId: item.id,
+          priority: "critical",
+          reason: "岗位风险等级为高",
+          actionLabel: "查看岗位",
+        }),
+      );
+    });
+
+  state.opportunities
+    .filter((item) => item.nextAction)
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `opportunity-action-${item.id}`,
+          type: "opportunity-action",
+          title: `${item.companyName} · ${item.roleTitle}`,
+          meta: item.nextAction,
+          module: "pipeline",
+          targetId: item.id,
+          dueAt: item.nextActionDueAt,
+          priority: item.priority === "high" ? "high" : "medium",
+          reason: "Pipeline 中有下一步动作",
+          actionLabel: "推进岗位",
+        }),
+      );
+    });
+
+  state.weaknesses
+    .filter((item) => ["open", "training", "validating"].includes(item.status))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `weakness-${item.id}`,
+          type: "weakness",
+          title: item.title,
+          meta: optionLabel(WEAKNESS_CATEGORIES, item.category),
+          module: "weakness",
+          targetId: item.id,
+          priority: item.severity === "high" ? "high" : "medium",
+          reason: `缺陷状态：${optionLabel(WEAKNESS_STATUSES, item.status)}`,
+          actionLabel: "修复缺陷",
+        }),
+      );
+    });
+
+  state.trainingTasks
+    .filter((item) => ["todo", "doing", "reviewing"].includes(item.status))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `training-task-${item.id}`,
+          type: "training-task",
+          title: item.title,
+          meta: optionLabel(TRAINING_TASK_TYPES, item.taskType),
+          module: "trainingTask",
+          targetId: item.id,
+          dueAt: item.dueAt,
+          priority: item.status === "reviewing" ? "high" : "medium",
+          reason: `训练状态：${optionLabel(TRAINING_TASK_STATUSES, item.status)}`,
+          actionLabel: "处理训练",
+        }),
+      );
+    });
+
+  state.projectAmmos
+    .filter((item) => item.status === "needs_deepening" || (item.status === "usable" && !existingPortfolioProjectAmmoIds.has(item.id)))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `project-ammo-${item.id}`,
+          type: "project-ammo",
+          title: item.projectName,
+          meta: optionLabel(PROJECT_TYPES, item.projectType),
+          module: "projectAmmo",
+          targetId: item.id,
+          priority: item.status === "needs_deepening" ? "high" : "low",
+          reason: item.status === "needs_deepening" ? "项目弹药需要继续深挖" : "可生成作品集项目卡",
+          actionLabel: "查看项目",
+        }),
+      );
+    });
+
+  state.followUpQuestions
+    .filter((item) => ["needs_drill", "unanswered", "drafted"].includes(item.status))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `follow-up-${item.id}`,
+          type: "follow-up",
+          title: item.question,
+          meta: optionLabel(FOLLOW_UP_QUESTION_TYPES, item.questionType),
+          module: "followUpQuestion",
+          targetId: item.id,
+          priority: item.status === "needs_drill" ? "high" : "medium",
+          reason: `追问状态：${optionLabel(FOLLOW_UP_QUESTION_STATUSES, item.status)}`,
+          actionLabel: "稳定回答",
+        }),
+      );
+    });
+
+  state.expressionDrills
+    .filter((item) => ["todo", "practicing", "reviewing"].includes(item.status) || item.score !== "stable")
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `expression-drill-${item.id}`,
+          type: "expression-drill",
+          title: item.question,
+          meta: optionLabel(EXPRESSION_DRILL_SOURCE_TYPES, item.sourceType),
+          module: "expressionDrill",
+          targetId: item.id,
+          priority: item.score === "unstable" ? "high" : "medium",
+          reason: `表达评分：${optionLabel(EXPRESSION_DRILL_SCORES, item.score)}`,
+          actionLabel: "继续训练",
+        }),
+      );
+    });
+
+  state.portfolioProjects
+    .filter((item) => item.visibility === "portfolio" && item.readiness !== "ready")
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `portfolio-project-${item.id}`,
+          type: "portfolio-project",
+          title: item.displayTitle,
+          meta: optionLabel(PORTFOLIO_READINESS, item.readiness),
+          module: "portfolio",
+          targetId: item.id,
+          priority: item.readiness === "needs_sanitizing" ? "high" : "medium",
+          reason: "作品集项目已进入展示区但还没准备好",
+          actionLabel: "整理作品集",
+        }),
+      );
+    });
+
+  state.aiAnalysisNotes
+    .filter((item) => item.status === "ai_responded")
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `ai-analysis-${item.id}`,
+          type: "ai-analysis",
+          title: item.title,
+          meta: optionLabel(AI_ANALYSIS_TYPES, item.analysisType),
+          module: "aiAnalysis",
+          targetId: item.id,
+          priority: "critical",
+          reason: "AI 输出已粘贴，等待人工决策",
+          actionLabel: "做决策",
+        }),
+      );
+    });
+
+  const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+  return items.sort((a, b) => {
+    const priorityDiff = (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9);
+    if (priorityDiff) return priorityDiff;
+    const bucketOrder = { overdue: 0, today: 1, soon: 2, later: 3, none: 4 };
+    const dueDiff = (bucketOrder[dateBucket(a.dueAt)] ?? 4) - (bucketOrder[dateBucket(b.dueAt)] ?? 4);
+    if (dueDiff) return dueDiff;
+    return String(a.title).localeCompare(String(b.title));
+  });
+}
+
+function dispatchMetrics(queue) {
+  return {
+    total: queue.length,
+    critical: queue.filter((item) => item.priority === "critical").length,
+    dueNow: queue.filter((item) => ["overdue", "today"].includes(dateBucket(item.dueAt))).length,
+    decisions: queue.filter((item) => item.type === "ai-analysis" || item.type === "interview-review").length,
+  };
+}
+
 function renderShell(content) {
   app.innerHTML = `
     <div class="app-shell">
@@ -1257,7 +1582,7 @@ function renderShell(content) {
           <div class="brand-mark">A</div>
           <div>
             <h1 class="brand-title">way2AIPM OS</h1>
-            <p class="brand-subtitle">v0.2 Markdown 工作台</p>
+            <p class="brand-subtitle">${APP_VERSION} Markdown 工作台</p>
           </div>
         </div>
         <nav class="nav">
@@ -1614,6 +1939,9 @@ function attachCommonEvents() {
   });
   document.querySelectorAll("[data-dashboard-ai-note-id]").forEach((button) => {
     button.addEventListener("click", () => openAiAnalysisNote(button.dataset.dashboardAiNoteId));
+  });
+  document.querySelectorAll("[data-dispatch-id]").forEach((button) => {
+    button.addEventListener("click", () => openDispatchItem(button.dataset.dispatchId));
   });
   document.querySelectorAll("[data-brief-project-id]").forEach((button) => {
     button.addEventListener("click", () => openProjectAmmo(button.dataset.briefProjectId));
@@ -2537,6 +2865,58 @@ async function submitAiAnalysisNote(event) {
   }
 }
 
+function renderDispatchQueue(queue) {
+  const topItems = queue.slice(0, 12);
+  if (!topItems.length) {
+    return `<div class="empty">当前没有需要调度的事项。下一步动作、面试、缺陷、训练和 AI 待决策都会汇总到这里。</div>`;
+  }
+
+  return `
+    <div class="dispatch-list">
+      ${topItems
+        .map(
+          (item) => `
+            <button class="dispatch-item" data-dispatch-id="${escapeHtml(item.id)}" type="button">
+              <div class="dispatch-main">
+                <div class="dispatch-title-row">
+                  <span class="tag dispatch-${item.priority}">${item.priority === "critical" ? "关键" : item.priority === "high" ? "高" : item.priority === "medium" ? "中" : "低"}</span>
+                  <p class="work-item-title">${escapeHtml(item.title)}</p>
+                </div>
+                <p class="work-item-meta">${escapeHtml(item.meta)}</p>
+                <p class="dispatch-reason">${escapeHtml(item.reason)}${item.dueAt ? ` · ${escapeHtml(dueLabel(item.dueAt))}` : ""}</p>
+              </div>
+              <span class="dispatch-action">${escapeHtml(item.actionLabel)}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderDispatchOverview(queue) {
+  const data = dispatchMetrics(queue);
+  return `
+    <section class="panel dispatch-panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">总控调度队列</h2>
+          <p class="panel-subtitle">从各模块实时汇总，优先处理关键项、逾期项和待人工决策事项。</p>
+        </div>
+      </div>
+      <div class="panel-body">
+        <section class="grid metrics compact-metrics dispatch-metrics">
+          <div class="metric"><div class="metric-label">待调度</div><div class="metric-value">${data.total}</div></div>
+          <div class="metric"><div class="metric-label">关键项</div><div class="metric-value">${data.critical}</div></div>
+          <div class="metric"><div class="metric-label">今日/逾期</div><div class="metric-value">${data.dueNow}</div></div>
+          <div class="metric"><div class="metric-label">待决策</div><div class="metric-value">${data.decisions}</div></div>
+        </section>
+        ${renderDispatchQueue(queue)}
+      </div>
+    </section>
+  `;
+}
+
 function renderDashboard() {
   const topbar = renderTopbar(
     "总控台",
@@ -2569,10 +2949,12 @@ function renderDashboard() {
   const pendingAiDecisions = state.aiAnalysisNotes
     .filter((item) => item.status === "ai_responded")
     .slice(0, 6);
+  const dispatchQueue = createDispatchQueue();
 
   return `
     ${topbar}
     ${renderMetricGrid()}
+    ${renderDispatchOverview(dispatchQueue)}
     <div class="dashboard-grid">
       <section class="panel">
         <div class="panel-header">
