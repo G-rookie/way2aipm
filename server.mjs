@@ -13,6 +13,7 @@ const INTERVIEWS_DIR = path.join(CONTENT_DIR, "interviews");
 const PRE_INTERVIEW_BRIEFS_DIR = path.join(CONTENT_DIR, "pre-interview-briefs");
 const INTERVIEW_REVIEWS_DIR = path.join(CONTENT_DIR, "interview-reviews");
 const WEAKNESSES_DIR = path.join(CONTENT_DIR, "weaknesses");
+const TRAINING_TASKS_DIR = path.join(CONTENT_DIR, "training-tasks");
 
 const STAGES = new Set([
   "collected",
@@ -47,6 +48,16 @@ const WEAKNESS_CATEGORIES = new Set([
 ]);
 const SEVERITIES = new Set(["low", "medium", "high"]);
 const WEAKNESS_STATUSES = new Set(["open", "training", "validating", "repaired", "archived"]);
+const TRAINING_TASK_TYPES = new Set([
+  "answer_rewrite",
+  "mock_interview",
+  "project_deep_dive",
+  "case_practice",
+  "knowledge_patch",
+  "expression_drill",
+  "other",
+]);
+const TRAINING_TASK_STATUSES = new Set(["todo", "doing", "reviewing", "done", "validated", "cancelled"]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -85,6 +96,7 @@ async function ensureContentDirs() {
   await mkdir(PRE_INTERVIEW_BRIEFS_DIR, { recursive: true });
   await mkdir(INTERVIEW_REVIEWS_DIR, { recursive: true });
   await mkdir(WEAKNESSES_DIR, { recursive: true });
+  await mkdir(TRAINING_TASKS_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -131,6 +143,13 @@ function createWeaknessId(title) {
   return `weak_${stamp}_${seed}_${random}`;
 }
 
+function createTrainingTaskId(title) {
+  const seed = slugify(title);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `task_${stamp}_${seed}_${random}`;
+}
+
 function sanitizeId(id, prefix) {
   const value = String(id || "");
   const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
@@ -168,6 +187,12 @@ function weaknessPath(id) {
   const safeId = sanitizeId(id, "weak");
   if (!safeId) return null;
   return path.join(WEAKNESSES_DIR, `${safeId}.md`);
+}
+
+function trainingTaskPath(id) {
+  const safeId = sanitizeId(id, "task");
+  if (!safeId) return null;
+  return path.join(TRAINING_TASKS_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -417,6 +442,44 @@ function normalizeWeakness(input, existing = {}) {
   };
 }
 
+function normalizeTrainingTask(input, existing = {}, weakness) {
+  const now = new Date().toISOString();
+  const title = String(input.title ?? existing.title ?? "").trim();
+  const weaknessId = String(input.weaknessId ?? existing.weaknessId ?? weakness?.id ?? "").trim();
+
+  if (!title) {
+    throw new Error("title is required");
+  }
+  if (!weaknessId) {
+    throw new Error("weaknessId is required");
+  }
+
+  const taskType = TRAINING_TASK_TYPES.has(input.taskType)
+    ? input.taskType
+    : existing.taskType || "answer_rewrite";
+  const status = TRAINING_TASK_STATUSES.has(input.status) ? input.status : existing.status || "todo";
+
+  return {
+    id: existing.id || input.id || createTrainingTaskId(title),
+    type: "trainingTask",
+    weaknessId,
+    title,
+    taskType,
+    targetAbility: String(input.targetAbility ?? existing.targetAbility ?? ""),
+    practiceOutput: String(input.practiceOutput ?? existing.practiceOutput ?? ""),
+    acceptanceCriteria: String(input.acceptanceCriteria ?? existing.acceptanceCriteria ?? ""),
+    status,
+    dueAt: String(input.dueAt ?? existing.dueAt ?? "").trim(),
+    validationNote: String(input.validationNote ?? existing.validationNote ?? ""),
+    relatedReviewId: String(input.relatedReviewId ?? existing.relatedReviewId ?? weakness?.relatedReviewIds?.[0] ?? "").trim(),
+    relatedInterviewRoundId: String(
+      input.relatedInterviewRoundId ?? existing.relatedInterviewRoundId ?? weakness?.relatedInterviewRoundIds?.[0] ?? "",
+    ).trim(),
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 function markdownEscapeTitle(value) {
   return String(value || "").replace(/\r?\n/g, " ").trim();
 }
@@ -463,6 +526,13 @@ function weaknessToMarkdown(weakness) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 证据\n\n${weakness.evidence}\n\n## 缺陷描述\n\n${weakness.description}\n`;
 }
 
+function trainingTaskToMarkdown(task) {
+  const frontMatter = JSON.stringify(task, null, 2);
+  const title = markdownEscapeTitle(task.title);
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 目标能力\n\n${task.targetAbility}\n\n## 练习产物\n\n${task.practiceOutput}\n\n## 验收标准\n\n${task.acceptanceCriteria}\n\n## 验证记录\n\n${task.validationNote}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -497,6 +567,12 @@ async function readReviewFile(filePath) {
 }
 
 async function readWeaknessFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readTrainingTaskFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -689,6 +765,47 @@ async function listWeaknesses(filters = {}) {
   return filtered;
 }
 
+async function listTrainingTasks(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(TRAINING_TASKS_DIR, { withFileTypes: true });
+  const tasks = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readTrainingTaskFile(path.join(TRAINING_TASKS_DIR, entry.name));
+      if (item.type === "trainingTask") {
+        tasks.push(item);
+      }
+    } catch (error) {
+      tasks.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "trainingTask",
+        weaknessId: "",
+        title: "读取失败",
+        taskType: "other",
+        status: "todo",
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = tasks.filter((task) => {
+    if (filters.weaknessId && task.weaknessId !== filters.weaknessId) return false;
+    if (filters.status && task.status !== filters.status) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const statusOrder = { todo: 0, doing: 1, reviewing: 2, done: 3, validated: 4, cancelled: 5 };
+    const statusDiff = (statusOrder[a.status] ?? 6) - (statusOrder[b.status] ?? 6);
+    if (statusDiff) return statusDiff;
+    return String(a.dueAt || "9999").localeCompare(String(b.dueAt || "9999"));
+  });
+  return filtered;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
@@ -749,6 +866,18 @@ async function getWeakness(id) {
   }
 }
 
+async function getTrainingTask(id) {
+  const filePath = trainingTaskPath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readTrainingTaskFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function saveOpportunity(opportunity) {
   await ensureContentDirs();
   const filePath = opportunityPath(opportunity.id);
@@ -799,6 +928,16 @@ async function saveWeakness(weakness) {
   return weakness;
 }
 
+async function saveTrainingTask(task) {
+  await ensureContentDirs();
+  const filePath = trainingTaskPath(task.id);
+  if (!filePath) {
+    throw new Error("Invalid training task id");
+  }
+  await writeFile(filePath, trainingTaskToMarkdown(task), "utf8");
+  return task;
+}
+
 function briefStatusToPreparationStatus(status) {
   if (status === "ready") return "ready";
   if (status === "needs_rework") return "needs_rework";
@@ -835,6 +974,17 @@ async function linkWeaknessToReviews(weakness) {
     const linkedWeaknessIds = unique([...(review.linkedWeaknessIds || []), weakness.id]);
     await saveReview({ ...review, linkedWeaknessIds, updatedAt: new Date().toISOString() });
   }
+}
+
+async function linkTaskToWeakness(task) {
+  const weakness = await getWeakness(task.weaknessId);
+  if (!weakness) return null;
+
+  const linkedTrainingTaskIds = unique([...(weakness.linkedTrainingTaskIds || []), task.id]);
+  const status = task.status === "validated" ? "validating" : weakness.status === "open" ? "training" : weakness.status;
+  const nextWeakness = normalizeWeakness({ ...weakness, linkedTrainingTaskIds, status }, weakness);
+  await saveWeakness(nextWeakness);
+  return nextWeakness;
 }
 
 async function readRequestBody(req) {
@@ -1092,6 +1242,56 @@ async function handleApi(req, res, url) {
       await saveWeakness(weakness);
       await linkWeaknessToReviews(weakness);
       return sendJson(res, 200, { weakness });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/training-tasks") {
+    if (req.method === "GET") {
+      const weaknessId = url.searchParams.get("weaknessId") || "";
+      const status = url.searchParams.get("status") || "";
+      const tasks = await listTrainingTasks({ weaknessId, status });
+      return sendJson(res, 200, { tasks });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const weakness = await getWeakness(body.weaknessId);
+      if (!weakness) {
+        return sendJson(res, 400, { error: "Related weakness not found" });
+      }
+      const task = normalizeTrainingTask(body, {}, weakness);
+      await saveTrainingTask(task);
+      const updatedWeakness = await linkTaskToWeakness(task);
+      return sendJson(res, 201, { task, weakness: updatedWeakness });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const trainingTaskMatch = url.pathname.match(/^\/api\/training-tasks\/([^/]+)$/);
+  if (trainingTaskMatch) {
+    const id = decodeURIComponent(trainingTaskMatch[1]);
+
+    if (req.method === "GET") {
+      const task = await getTrainingTask(id);
+      if (!task) return notFound(res);
+      return sendJson(res, 200, { task });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getTrainingTask(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      const weakness = await getWeakness(body.weaknessId || existing.weaknessId);
+      if (!weakness) {
+        return sendJson(res, 400, { error: "Related weakness not found" });
+      }
+      const task = normalizeTrainingTask({ ...body, id }, existing, weakness);
+      await saveTrainingTask(task);
+      const updatedWeakness = await linkTaskToWeakness(task);
+      return sendJson(res, 200, { task, weakness: updatedWeakness });
     }
 
     return methodNotAllowed(res);

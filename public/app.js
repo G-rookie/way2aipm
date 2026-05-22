@@ -100,6 +100,25 @@ const WEAKNESS_STATUSES = [
   ["archived", "已归档"],
 ];
 
+const TRAINING_TASK_TYPES = [
+  ["answer_rewrite", "重写回答"],
+  ["mock_interview", "模拟面试"],
+  ["project_deep_dive", "项目深挖"],
+  ["case_practice", "案例练习"],
+  ["knowledge_patch", "知识补齐"],
+  ["expression_drill", "表达训练"],
+  ["other", "其他"],
+];
+
+const TRAINING_TASK_STATUSES = [
+  ["todo", "待做"],
+  ["doing", "进行中"],
+  ["reviewing", "待验收"],
+  ["done", "已完成"],
+  ["validated", "已验证"],
+  ["cancelled", "已取消"],
+];
+
 const MODULES = [
   ["dashboard", "总控台", "00"],
   ["pipeline", "求职中台", "01"],
@@ -187,6 +206,20 @@ const EMPTY_WEAKNESS = {
   linkedTrainingTaskIds: [],
 };
 
+const EMPTY_TRAINING_TASK = {
+  weaknessId: "",
+  title: "",
+  taskType: "answer_rewrite",
+  targetAbility: "",
+  practiceOutput: "",
+  acceptanceCriteria: "",
+  status: "todo",
+  dueAt: "",
+  validationNote: "",
+  relatedReviewId: "",
+  relatedInterviewRoundId: "",
+};
+
 const state = {
   activeModule: "dashboard",
   opportunities: [],
@@ -194,22 +227,26 @@ const state = {
   briefs: [],
   reviews: [],
   weaknesses: [],
+  trainingTasks: [],
   selectedId: null,
   selectedInterviewId: null,
   selectedBriefId: null,
   selectedReviewId: null,
   selectedWeaknessId: null,
+  selectedTrainingTaskId: null,
   draft: null,
   interviewDraft: null,
   briefDraft: null,
   reviewDraft: null,
   weaknessDraft: null,
+  trainingTaskDraft: null,
   loading: true,
   saving: false,
   savingInterview: false,
   savingBrief: false,
   savingReview: false,
   savingWeakness: false,
+  savingTrainingTask: false,
 };
 
 const app = document.querySelector("#app");
@@ -265,18 +302,27 @@ async function loadData() {
   state.loading = true;
   render();
   try {
-    const [opportunitiesPayload, interviewsPayload, briefsPayload, reviewsPayload, weaknessesPayload] = await Promise.all([
+    const [
+      opportunitiesPayload,
+      interviewsPayload,
+      briefsPayload,
+      reviewsPayload,
+      weaknessesPayload,
+      trainingTasksPayload,
+    ] = await Promise.all([
       api("/api/opportunities"),
       api("/api/interviews"),
       api("/api/pre-interview-briefs"),
       api("/api/interview-reviews"),
       api("/api/weaknesses"),
+      api("/api/training-tasks"),
     ]);
     state.opportunities = opportunitiesPayload.opportunities || [];
     state.interviews = interviewsPayload.interviews || [];
     state.briefs = briefsPayload.briefs || [];
     state.reviews = reviewsPayload.reviews || [];
     state.weaknesses = weaknessesPayload.weaknesses || [];
+    state.trainingTasks = trainingTasksPayload.tasks || [];
     if (!state.selectedId && state.opportunities.length) {
       state.selectedId = state.opportunities[0].id;
     }
@@ -291,6 +337,9 @@ async function loadData() {
     }
     if (!state.selectedWeaknessId && state.weaknesses.length) {
       state.selectedWeaknessId = state.weaknesses[0].id;
+    }
+    if (!state.selectedTrainingTaskId && state.selectedWeaknessId) {
+      state.selectedTrainingTaskId = tasksForWeakness(state.selectedWeaknessId)[0]?.id || null;
     }
   } catch (error) {
     showToast(error.message);
@@ -364,6 +413,8 @@ function selectedWeakness() {
 function selectWeakness(id) {
   state.selectedWeaknessId = id;
   state.weaknessDraft = null;
+  state.trainingTaskDraft = null;
+  state.selectedTrainingTaskId = tasksForWeakness(id)[0]?.id || null;
   render();
 }
 
@@ -371,6 +422,44 @@ function beginNewWeakness(seed = {}) {
   state.activeModule = "weakness";
   state.weaknessDraft = { ...EMPTY_WEAKNESS, ...seed };
   state.selectedWeaknessId = null;
+  state.selectedTrainingTaskId = null;
+  state.trainingTaskDraft = null;
+  render();
+}
+
+function tasksForWeakness(weaknessId) {
+  return state.trainingTasks.filter((task) => task.weaknessId === weaknessId);
+}
+
+function selectedTrainingTask() {
+  if (state.trainingTaskDraft) return state.trainingTaskDraft;
+  return state.trainingTasks.find((item) => item.id === state.selectedTrainingTaskId) || null;
+}
+
+function selectTrainingTask(id) {
+  state.selectedTrainingTaskId = id;
+  state.trainingTaskDraft = null;
+  render();
+}
+
+function beginTrainingTaskForSelectedWeakness() {
+  const weakness = selectedWeakness();
+  if (!weakness?.id) {
+    showToast("请先选择或保存一个能力缺陷");
+    return;
+  }
+
+  state.trainingTaskDraft = {
+    ...EMPTY_TRAINING_TASK,
+    weaknessId: weakness.id,
+    title: `修复：${weakness.title}`,
+    targetAbility: weakness.description,
+    practiceOutput: "",
+    acceptanceCriteria: "能用结构化回答清楚说明，并经复盘确认可用。",
+    relatedReviewId: weakness.relatedReviewIds?.[0] || "",
+    relatedInterviewRoundId: weakness.relatedInterviewRoundIds?.[0] || "",
+  };
+  state.selectedTrainingTaskId = null;
   render();
 }
 
@@ -558,6 +647,14 @@ function weaknessMetrics() {
     open: state.weaknesses.filter((weakness) => weakness.status === "open").length,
     training: state.weaknesses.filter((weakness) => weakness.status === "training").length,
     high: state.weaknesses.filter((weakness) => weakness.severity === "high").length,
+  };
+}
+
+function trainingTaskMetrics() {
+  return {
+    total: state.trainingTasks.length,
+    active: state.trainingTasks.filter((task) => ["todo", "doing", "reviewing"].includes(task.status)).length,
+    validated: state.trainingTasks.filter((task) => task.status === "validated").length,
   };
 }
 
@@ -937,8 +1034,14 @@ function attachCommonEvents() {
   document.querySelector("#create-review-btn")?.addEventListener("click", beginReviewForSelectedInterview);
   document.querySelector("#create-weakness-from-review-btn")?.addEventListener("click", beginWeaknessFromSelectedReview);
   document.querySelector("#new-weakness-btn")?.addEventListener("click", () => beginNewWeakness());
+  document.querySelectorAll(".new-training-task-btn").forEach((button) => {
+    button.addEventListener("click", beginTrainingTaskForSelectedWeakness);
+  });
   document.querySelectorAll("[data-weakness-id]").forEach((button) => {
     button.addEventListener("click", () => selectWeakness(button.dataset.weaknessId));
+  });
+  document.querySelectorAll("[data-training-task-id]").forEach((button) => {
+    button.addEventListener("click", () => selectTrainingTask(button.dataset.trainingTaskId));
   });
   document.querySelector("#cancel-interview-btn")?.addEventListener("click", () => {
     state.interviewDraft = null;
@@ -960,11 +1063,17 @@ function attachCommonEvents() {
     state.selectedWeaknessId = state.weaknesses[0]?.id || null;
     render();
   });
+  document.querySelector("#cancel-training-task-btn")?.addEventListener("click", () => {
+    state.trainingTaskDraft = null;
+    state.selectedTrainingTaskId = state.selectedWeaknessId ? tasksForWeakness(state.selectedWeaknessId)[0]?.id || null : null;
+    render();
+  });
   document.querySelector("#opportunity-form")?.addEventListener("submit", submitOpportunity);
   document.querySelector("#interview-form")?.addEventListener("submit", submitInterview);
   document.querySelector("#brief-form")?.addEventListener("submit", submitBrief);
   document.querySelector("#review-form")?.addEventListener("submit", submitReview);
   document.querySelector("#weakness-form")?.addEventListener("submit", submitWeakness);
+  document.querySelector("#training-task-form")?.addEventListener("submit", submitTrainingTask);
 }
 
 function formToOpportunity(form) {
@@ -1266,16 +1375,79 @@ async function submitWeakness(event) {
     state.selectedWeaknessId = result.weakness.id;
     state.weaknessDraft = null;
     showToast("能力缺陷已保存");
-    const [weaknessList, reviewList] = await Promise.all([
+    const [weaknessList, reviewList, trainingTaskList] = await Promise.all([
       api("/api/weaknesses"),
       api("/api/interview-reviews"),
+      api("/api/training-tasks"),
     ]);
     state.weaknesses = weaknessList.weaknesses || [];
     state.reviews = reviewList.reviews || [];
+    state.trainingTasks = trainingTaskList.tasks || [];
   } catch (error) {
     showToast(error.message);
   } finally {
     state.savingWeakness = false;
+    render();
+  }
+}
+
+function formToTrainingTask(form) {
+  const formData = new FormData(form);
+  const weakness = selectedWeakness();
+  return {
+    weaknessId: formData.get("weaknessId") || weakness?.id,
+    title: formData.get("title"),
+    taskType: formData.get("taskType"),
+    targetAbility: formData.get("targetAbility"),
+    practiceOutput: formData.get("practiceOutput"),
+    acceptanceCriteria: formData.get("acceptanceCriteria"),
+    status: formData.get("status"),
+    dueAt: formData.get("dueAt"),
+    validationNote: formData.get("validationNote"),
+    relatedReviewId: formData.get("relatedReviewId"),
+    relatedInterviewRoundId: formData.get("relatedInterviewRoundId"),
+  };
+}
+
+async function submitTrainingTask(event) {
+  event.preventDefault();
+  if (state.savingTrainingTask) return;
+
+  const form = event.currentTarget;
+  const payload = formToTrainingTask(form);
+  if (state.trainingTaskDraft) {
+    state.trainingTaskDraft = { ...state.trainingTaskDraft, ...payload };
+  } else {
+    state.trainingTasks = state.trainingTasks.map((item) =>
+      item.id === state.selectedTrainingTaskId ? { ...item, ...payload } : item,
+    );
+  }
+  state.savingTrainingTask = true;
+  render();
+
+  try {
+    const isNew = Boolean(state.trainingTaskDraft);
+    const path = isNew
+      ? "/api/training-tasks"
+      : `/api/training-tasks/${encodeURIComponent(state.selectedTrainingTaskId)}`;
+    const method = isNew ? "POST" : "PUT";
+    const result = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    state.selectedTrainingTaskId = result.task.id;
+    state.trainingTaskDraft = null;
+    showToast("训练任务已保存");
+    const [taskList, weaknessList] = await Promise.all([
+      api("/api/training-tasks"),
+      api("/api/weaknesses"),
+    ]);
+    state.trainingTasks = taskList.tasks || [];
+    state.weaknesses = weaknessList.weaknesses || [];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingTrainingTask = false;
     render();
   }
 }
@@ -1686,14 +1858,15 @@ function renderReviewForm(interview) {
 
 function renderWeakness() {
   const data = weaknessMetrics();
+  const taskData = trainingTaskMetrics();
   const weakness = selectedWeakness();
   return `
     ${renderTopbar("缺陷与训练中心", "这里会承接复盘中的弱回答，沉淀成能力缺陷和训练任务。", "04 Weakness & Training")}
     <section class="grid metrics compact-metrics">
       <div class="metric"><div class="metric-label">缺陷总数</div><div class="metric-value">${data.total}</div></div>
       <div class="metric"><div class="metric-label">待处理</div><div class="metric-value">${data.open}</div></div>
-      <div class="metric"><div class="metric-label">训练中</div><div class="metric-value">${data.training}</div></div>
-      <div class="metric"><div class="metric-label">高严重度</div><div class="metric-value">${data.high}</div></div>
+      <div class="metric"><div class="metric-label">进行中训练</div><div class="metric-value">${taskData.active}</div></div>
+      <div class="metric"><div class="metric-label">已验证训练</div><div class="metric-value">${taskData.validated}</div></div>
     </section>
     <div class="workspace">
       <section class="panel">
@@ -1706,7 +1879,10 @@ function renderWeakness() {
         </div>
         <div class="panel-body">${renderWeaknessList()}</div>
       </section>
-      ${renderWeaknessDetail(weakness)}
+      <div class="stack">
+        ${renderWeaknessDetail(weakness)}
+        ${renderTrainingTaskSection(weakness)}
+      </div>
     </div>
   `;
 }
@@ -1793,7 +1969,7 @@ function renderWeaknessDetail(weakness) {
                 <label>关联复盘</label>
                 <p class="mini-meta">${(weakness.relatedReviewIds || []).length ? `已关联 ${(weakness.relatedReviewIds || []).length} 条复盘证据` : "尚未关联复盘"}</p>
               </div>
-              <span class="mini-meta">训练任务将在下一切片补齐</span>
+              <button class="btn new-training-task-btn" type="button">创建训练任务</button>
             </div>
           </div>
           <div class="form-field full">
@@ -1806,6 +1982,101 @@ function renderWeaknessDetail(weakness) {
         </form>
       </div>
     </section>
+  `;
+}
+
+function renderTrainingTaskSection(weakness) {
+  if (!weakness?.id) {
+    return "";
+  }
+
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">训练任务</h2>
+          <p class="panel-subtitle">把缺陷变成有产物、有验收标准的修复任务。</p>
+        </div>
+        <button class="btn new-training-task-btn" type="button">新增训练任务</button>
+      </div>
+      <div class="panel-body stack">
+        ${renderTrainingTaskList(weakness.id)}
+        ${renderTrainingTaskForm(weakness)}
+      </div>
+    </section>
+  `;
+}
+
+function renderTrainingTaskList(weaknessId) {
+  const tasks = tasksForWeakness(weaknessId);
+  if (!tasks.length) {
+    return `<div class="empty">还没有训练任务。先为这个缺陷创建一个可验收的修复动作。</div>`;
+  }
+
+  return `
+    <div class="work-list">
+      ${tasks
+        .map(
+          (task) => `
+            <button class="work-item weakness-item ${task.id === state.selectedTrainingTaskId ? "active" : ""}" data-training-task-id="${escapeHtml(task.id)}" type="button">
+              <div>
+                <p class="work-item-title">${escapeHtml(task.title)}</p>
+                <p class="work-item-meta">${optionLabel(TRAINING_TASK_TYPES, task.taskType)}${task.dueAt ? ` · ${escapeHtml(task.dueAt)}` : ""}</p>
+              </div>
+              <span class="tag task-${task.status}">${optionLabel(TRAINING_TASK_STATUSES, task.status)}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderTrainingTaskForm(weakness) {
+  const task = selectedTrainingTask();
+  const isNew = Boolean(state.trainingTaskDraft);
+
+  if (!task) {
+    return `<div class="empty">选择一个训练任务进行编辑，或新增第一条训练任务。</div>`;
+  }
+
+  return `
+    <form id="training-task-form" class="form-grid">
+      <div class="form-field full">
+        <label>任务标题</label>
+        <input name="title" value="${escapeHtml(task.title)}" required />
+      </div>
+      <div class="form-field">
+        <label>任务类型</label>
+        ${renderSelect("taskType", TRAINING_TASK_TYPES, task.taskType)}
+      </div>
+      <div class="form-field">
+        <label>任务状态</label>
+        ${renderSelect("status", TRAINING_TASK_STATUSES, task.status)}
+      </div>
+      <div class="form-field">
+        <label>截止时间</label>
+        <input name="dueAt" type="date" value="${escapeHtml(task.dueAt)}" />
+      </div>
+      <div class="form-field">
+        <label>关联缺陷</label>
+        <input value="${escapeHtml(weakness.title)}" disabled />
+      </div>
+      ${renderBriefField("targetAbility", "目标能力", task.targetAbility, "这次训练要修复什么能力问题")}
+      ${renderBriefField("practiceOutput", "练习产物", task.practiceOutput, "写下重写后的回答、模拟面试记录或练习结果")}
+      ${renderBriefField("acceptanceCriteria", "验收标准", task.acceptanceCriteria, "怎样才算完成，最好可检查、可复盘")}
+      ${renderBriefField("validationNote", "验证记录", task.validationNote, "后续面试或复盘中如何证明改善了")}
+      <input name="weaknessId" type="hidden" value="${escapeHtml(weakness.id)}" />
+      <input name="relatedReviewId" type="hidden" value="${escapeHtml(task.relatedReviewId)}" />
+      <input name="relatedInterviewRoundId" type="hidden" value="${escapeHtml(task.relatedInterviewRoundId)}" />
+      <div class="form-field full">
+        <div class="actions">
+          ${isNew ? `<button class="btn" id="cancel-training-task-btn" type="button">取消</button>` : ""}
+          <button class="btn primary" type="submit">${state.savingTrainingTask ? "保存中..." : "保存训练任务"}</button>
+        </div>
+        <div class="status-line">${task.updatedAt ? `上次更新：${escapeHtml(task.updatedAt)}` : "保存后会写入 content/training-tasks。"}</div>
+      </div>
+    </form>
   `;
 }
 

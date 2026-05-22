@@ -458,6 +458,32 @@ h1 {
   color: var(--muted);
 }
 
+.tag.task-todo {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.tag.task-doing,
+.tag.task-reviewing {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.tag.task-done {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.tag.task-validated {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.tag.task-cancelled {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
 .next-action {
   margin: 10px 0 0;
   color: var(--muted);
