@@ -237,6 +237,11 @@ function briefForInterview(interviewRoundId) {
     .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0] || null;
 }
 
+function briefStatusForInterview(interviewRoundId) {
+  const brief = briefForInterview(interviewRoundId);
+  return brief ? optionLabel(BRIEF_STATUSES, brief.status) : "未创建 Brief";
+}
+
 function selectedBrief() {
   if (state.briefDraft) return state.briefDraft;
   return state.briefs.find((item) => item.id === state.selectedBriefId) || null;
@@ -297,6 +302,12 @@ function selectInterviewForBrief(id) {
   state.interviewDraft = null;
   state.briefDraft = null;
   state.selectedBriefId = briefForInterview(id)?.id || null;
+  render();
+}
+
+function openPreInterviewForInterview(id) {
+  selectInterviewForBrief(id);
+  state.activeModule = "preInterview";
   render();
 }
 
@@ -424,7 +435,7 @@ function renderOpportunityCard(opportunity) {
     ? `<p class="next-action">下一步：${escapeHtml(opportunity.nextAction)}</p>`
     : "";
   const interviewLine = nextInterview
-    ? `<p class="next-action">面试：${escapeHtml(nextInterview.roundName)}${nextInterview.scheduledAt ? ` · ${escapeHtml(formatDateTime(nextInterview.scheduledAt))}` : ""}</p>`
+    ? `<p class="next-action">面试：${escapeHtml(nextInterview.roundName)}${nextInterview.scheduledAt ? ` · ${escapeHtml(formatDateTime(nextInterview.scheduledAt))}` : ""} · ${escapeHtml(briefStatusForInterview(nextInterview.id))}</p>`
     : "";
   return `
     <button class="opp-card ${active ? "active" : ""}" data-select-id="${escapeHtml(opportunity.id)}" type="button">
@@ -507,6 +518,10 @@ function renderInterviewList(opportunity) {
               <div class="tag-row">
                 <span class="tag stage">${optionLabel(INTERVIEW_STATUSES, interview.status)}</span>
                 <span class="tag prep-${interview.preparationStatus}">${optionLabel(PREPARATION_STATUSES, interview.preparationStatus)}</span>
+              </div>
+              <div class="interview-actions">
+                <span class="mini-meta">${escapeHtml(briefStatusForInterview(interview.id))}</span>
+                <span class="mini-link" data-open-brief-id="${escapeHtml(interview.id)}">作战室</span>
               </div>
             </button>
           `,
@@ -690,8 +705,9 @@ function attachCommonEvents() {
     button.addEventListener("click", () => {
       selectOpportunity(button.dataset.selectId);
       if (button.dataset.interviewId) {
-        state.activeModule = "pipeline";
+        state.activeModule = "preInterview";
         state.selectedInterviewId = button.dataset.interviewId;
+        state.selectedBriefId = briefForInterview(button.dataset.interviewId)?.id || null;
         render();
       }
     });
@@ -704,6 +720,12 @@ function attachCommonEvents() {
   document.querySelector("#new-interview-btn")?.addEventListener("click", beginNewInterview);
   document.querySelectorAll("[data-interview-id]").forEach((button) => {
     button.addEventListener("click", () => selectInterview(button.dataset.interviewId));
+  });
+  document.querySelectorAll("[data-open-brief-id]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openPreInterviewForInterview(button.dataset.openBriefId);
+    });
   });
   document.querySelector("#pre-interview-selector")?.addEventListener("change", (event) => {
     selectInterviewForBrief(event.target.value);
@@ -1052,6 +1074,20 @@ function renderPreInterviewSelector() {
   `;
 }
 
+function renderBriefProgress() {
+  const readyCount = state.briefs.filter((brief) => brief.status === "ready").length;
+  const draftCount = state.briefs.filter((brief) => brief.status === "draft").length;
+  const reworkCount = state.briefs.filter((brief) => brief.status === "needs_rework").length;
+  return `
+    <section class="grid metrics compact-metrics">
+      <div class="metric"><div class="metric-label">Brief 总数</div><div class="metric-value">${state.briefs.length}</div></div>
+      <div class="metric"><div class="metric-label">草稿</div><div class="metric-value">${draftCount}</div></div>
+      <div class="metric"><div class="metric-label">已准备</div><div class="metric-value">${readyCount}</div></div>
+      <div class="metric"><div class="metric-label">需补强</div><div class="metric-value">${reworkCount}</div></div>
+    </section>
+  `;
+}
+
 function renderBriefField(name, label, value, placeholder = "") {
   return `
     <div class="form-field full">
@@ -1138,6 +1174,7 @@ function renderPreInterview() {
   const interview = selectedInterview();
   return `
     ${renderTopbar("面试前作战室", "围绕具体面试轮次完成公司调研、JD 拆解、项目映射、问题预测和准备清单。", "02 Pre-Interview Room")}
+    ${renderBriefProgress()}
     <div class="pre-interview-layout">
       ${renderPreInterviewSelector()}
       ${renderBriefForm(interview)}

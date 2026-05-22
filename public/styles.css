@@ -220,6 +220,14 @@ h1 {
   margin-bottom: 18px;
 }
 
+.compact-metrics .metric {
+  padding: 12px;
+}
+
+.compact-metrics .metric-value {
+  font-size: 22px;
+}
+
 .metric {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -530,10 +538,40 @@ textarea:focus {
   text-align: left;
 }
 
+.interview-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .interview-item:hover,
 .interview-item.active {
   border-color: var(--ink);
   box-shadow: 0 8px 20px rgba(36, 31, 24, 0.07);
+}
+
+.interview-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.mini-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mini-link {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mini-link:hover {
+  color: var(--accent-ink);
 }
 
 .compact-form textarea {
