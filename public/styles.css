@@ -616,6 +616,27 @@ h1 {
   color: var(--green);
 }
 
+.tag.frontier-inbox {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.tag.frontier-summarized {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.tag.frontier-mapped,
+.tag.frontier-applied {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.tag.frontier-archived {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
 .tag.dispatch-critical {
   background: var(--red-bg);
   color: var(--red);
@@ -803,7 +824,8 @@ textarea:focus {
   min-height: 88px;
 }
 
-.ai-analysis-form textarea.tall-textarea {
+.ai-analysis-form textarea.tall-textarea,
+.ai-frontier-form textarea.tall-textarea {
   min-height: 154px;
 }
 

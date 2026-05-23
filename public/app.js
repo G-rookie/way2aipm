@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.7";
+const APP_VERSION = "v0.8";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -228,6 +228,25 @@ const AI_ANALYSIS_STATUSES = [
   ["archived", "已归档"],
 ];
 
+const AI_FRONTIER_CATEGORIES = [
+  ["model_capability", "模型能力"],
+  ["ai_product", "AI 产品"],
+  ["agent_workflow", "Agent 工作流"],
+  ["industry_case", "行业案例"],
+  ["research_paper", "研究论文"],
+  ["market_signal", "市场信号"],
+  ["pm_framework", "PM 框架"],
+  ["other", "其他"],
+];
+
+const AI_FRONTIER_STATUSES = [
+  ["inbox", "待消化"],
+  ["summarized", "已总结"],
+  ["mapped", "已迁移"],
+  ["applied", "已应用"],
+  ["archived", "已归档"],
+];
+
 const MODULES = [
   ["dashboard", "总控台", "00"],
   ["pipeline", "求职中台", "01"],
@@ -237,6 +256,7 @@ const MODULES = [
   ["projectAmmo", "项目弹药库", "05"],
   ["portfolio", "作品集产品线", "06"],
   ["aiAnalysis", "AI 辅助分析", "07"],
+  ["aiFrontier", "AI 前沿框架", "08"],
 ];
 
 const EMPTY_OPPORTUNITY = {
@@ -422,6 +442,23 @@ const EMPTY_AI_ANALYSIS_NOTE = {
   status: "prompt_ready",
 };
 
+const EMPTY_AI_FRONTIER_CARD = {
+  topic: "",
+  category: "ai_product",
+  sourceName: "",
+  sourceUrl: "",
+  sourceDate: "",
+  summary: "",
+  keyInsights: "",
+  productImplications: "",
+  interviewTransfer: "",
+  portfolioTransfer: "",
+  openQuestions: "",
+  tags: "",
+  status: "inbox",
+  priority: "medium",
+};
+
 const state = {
   activeModule: "dashboard",
   opportunities: [],
@@ -437,6 +474,7 @@ const state = {
   portfolioProjects: [],
   portfolioPreviewMode: false,
   aiAnalysisNotes: [],
+  aiFrontierCards: [],
   selectedId: null,
   selectedInterviewId: null,
   selectedBriefId: null,
@@ -448,6 +486,7 @@ const state = {
   selectedExpressionDrillId: null,
   selectedPortfolioProjectId: null,
   selectedAiAnalysisNoteId: null,
+  selectedAiFrontierCardId: null,
   draft: null,
   interviewDraft: null,
   briefDraft: null,
@@ -459,6 +498,7 @@ const state = {
   expressionDrillDraft: null,
   portfolioProjectDraft: null,
   aiAnalysisNoteDraft: null,
+  aiFrontierCardDraft: null,
   loading: true,
   saving: false,
   savingInterview: false,
@@ -472,6 +512,7 @@ const state = {
   savingPortfolioProfile: false,
   savingPortfolioProject: false,
   savingAiAnalysisNote: false,
+  savingAiFrontierCard: false,
   generatingAiContext: false,
 };
 
@@ -541,6 +582,7 @@ async function loadData() {
       portfolioProfilePayload,
       portfolioProjectsPayload,
       aiAnalysisNotesPayload,
+      aiFrontierCardsPayload,
     ] = await Promise.all([
       api("/api/opportunities"),
       api("/api/interviews"),
@@ -554,6 +596,7 @@ async function loadData() {
       api("/api/portfolio-profile"),
       api("/api/portfolio-projects"),
       api("/api/ai-analysis-notes"),
+      api("/api/ai-frontier-cards"),
     ]);
     state.opportunities = opportunitiesPayload.opportunities || [];
     state.interviews = interviewsPayload.interviews || [];
@@ -567,6 +610,7 @@ async function loadData() {
     state.portfolioProfile = portfolioProfilePayload.profile || { ...EMPTY_PORTFOLIO_PROFILE };
     state.portfolioProjects = portfolioProjectsPayload.portfolioProjects || [];
     state.aiAnalysisNotes = aiAnalysisNotesPayload.aiAnalysisNotes || [];
+    state.aiFrontierCards = aiFrontierCardsPayload.aiFrontierCards || [];
     if (!state.selectedId && state.opportunities.length) {
       state.selectedId = state.opportunities[0].id;
     }
@@ -605,6 +649,9 @@ async function loadData() {
     }
     if (!state.selectedAiAnalysisNoteId && state.aiAnalysisNotes.length) {
       state.selectedAiAnalysisNoteId = state.aiAnalysisNotes[0].id;
+    }
+    if (!state.selectedAiFrontierCardId && state.aiFrontierCards.length) {
+      state.selectedAiFrontierCardId = state.aiFrontierCards[0].id;
     }
   } catch (error) {
     showToast(error.message);
@@ -774,6 +821,11 @@ function selectedAiAnalysisNote() {
   return state.aiAnalysisNotes.find((item) => item.id === state.selectedAiAnalysisNoteId) || null;
 }
 
+function selectedAiFrontierCard() {
+  if (state.aiFrontierCardDraft) return state.aiFrontierCardDraft;
+  return state.aiFrontierCards.find((item) => item.id === state.selectedAiFrontierCardId) || null;
+}
+
 function portfolioProjectsInPreview() {
   return state.portfolioProjects
     .filter((item) => item.visibility === "portfolio")
@@ -796,6 +848,15 @@ function aiAnalysisMetrics() {
     promptReady: state.aiAnalysisNotes.filter((item) => item.status === "prompt_ready").length,
     responded: state.aiAnalysisNotes.filter((item) => item.status === "ai_responded").length,
     decided: state.aiAnalysisNotes.filter((item) => item.status === "decided").length,
+  };
+}
+
+function aiFrontierMetrics() {
+  return {
+    total: state.aiFrontierCards.length,
+    inbox: state.aiFrontierCards.filter((item) => item.status === "inbox").length,
+    mapped: state.aiFrontierCards.filter((item) => ["mapped", "applied"].includes(item.status)).length,
+    high: state.aiFrontierCards.filter((item) => item.priority === "high").length,
   };
 }
 
@@ -823,9 +884,20 @@ function selectAiAnalysisNote(id) {
   render();
 }
 
+function selectAiFrontierCard(id) {
+  state.selectedAiFrontierCardId = id;
+  state.aiFrontierCardDraft = null;
+  render();
+}
+
 function openAiAnalysisNote(id) {
   state.activeModule = "aiAnalysis";
   selectAiAnalysisNote(id);
+}
+
+function openAiFrontierCard(id) {
+  state.activeModule = "aiFrontier";
+  selectAiFrontierCard(id);
 }
 
 function openDispatchItem(id) {
@@ -873,6 +945,10 @@ function openDispatchItem(id) {
   }
   if (item.module === "aiAnalysis") {
     openAiAnalysisNote(item.targetId);
+    return;
+  }
+  if (item.module === "aiFrontier") {
+    openAiFrontierCard(item.targetId);
   }
 }
 
@@ -893,6 +969,13 @@ async function beginNewAiAnalysisNote() {
   state.activeModule = "aiAnalysis";
   state.aiAnalysisNoteDraft = { ...EMPTY_AI_ANALYSIS_NOTE, title: "新的 AI 辅助分析" };
   state.selectedAiAnalysisNoteId = null;
+  render();
+}
+
+function beginNewAiFrontierCard() {
+  state.activeModule = "aiFrontier";
+  state.aiFrontierCardDraft = { ...EMPTY_AI_FRONTIER_CARD, topic: "新的 AI 前沿卡片" };
+  state.selectedAiFrontierCardId = null;
   render();
 }
 
@@ -1554,6 +1637,28 @@ function createDispatchQueue() {
       );
     });
 
+  state.aiFrontierCards
+    .filter((item) =>
+      item.status === "inbox" ||
+      (item.status === "summarized" && !String(item.interviewTransfer || "").trim()) ||
+      (item.priority === "high" && !["mapped", "applied", "archived"].includes(item.status)),
+    )
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `ai-frontier-${item.id}`,
+          type: "ai-frontier",
+          title: item.topic,
+          meta: optionLabel(AI_FRONTIER_CATEGORIES, item.category),
+          module: "aiFrontier",
+          targetId: item.id,
+          priority: item.priority === "high" || item.status === "inbox" ? "high" : "medium",
+          reason: item.status === "summarized" ? "已总结，等待面试迁移" : `前沿卡片状态：${optionLabel(AI_FRONTIER_STATUSES, item.status)}`,
+          actionLabel: "消化前沿",
+        }),
+      );
+    });
+
   const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
   return items.sort((a, b) => {
     const priorityDiff = (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9);
@@ -1981,6 +2086,10 @@ function attachCommonEvents() {
     render();
   });
   document.querySelector("#generate-ai-context-btn")?.addEventListener("click", generateAiAnalysisContext);
+  document.querySelector("#new-ai-frontier-card-btn")?.addEventListener("click", beginNewAiFrontierCard);
+  document.querySelectorAll("[data-ai-frontier-card-id]").forEach((button) => {
+    button.addEventListener("click", () => selectAiFrontierCard(button.dataset.aiFrontierCardId));
+  });
   document.querySelector("#cancel-new-btn")?.addEventListener("click", () => {
     state.draft = null;
     state.selectedId = state.opportunities[0]?.id || null;
@@ -2111,6 +2220,11 @@ function attachCommonEvents() {
     state.selectedAiAnalysisNoteId = state.aiAnalysisNotes[0]?.id || null;
     render();
   });
+  document.querySelector("#cancel-ai-frontier-card-btn")?.addEventListener("click", () => {
+    state.aiFrontierCardDraft = null;
+    state.selectedAiFrontierCardId = state.aiFrontierCards[0]?.id || null;
+    render();
+  });
   document.querySelector("#opportunity-form")?.addEventListener("submit", submitOpportunity);
   document.querySelector("#interview-form")?.addEventListener("submit", submitInterview);
   document.querySelector("#brief-form")?.addEventListener("submit", submitBrief);
@@ -2123,6 +2237,7 @@ function attachCommonEvents() {
   document.querySelector("#portfolio-profile-form")?.addEventListener("submit", submitPortfolioProfile);
   document.querySelector("#portfolio-project-form")?.addEventListener("submit", submitPortfolioProject);
   document.querySelector("#ai-analysis-form")?.addEventListener("submit", submitAiAnalysisNote);
+  document.querySelector("#ai-frontier-card-form")?.addEventListener("submit", submitAiFrontierCard);
 }
 
 function formToOpportunity(form) {
@@ -2861,6 +2976,62 @@ async function submitAiAnalysisNote(event) {
     showToast(error.message);
   } finally {
     state.savingAiAnalysisNote = false;
+    render();
+  }
+}
+
+function formToAiFrontierCard(form) {
+  const formData = new FormData(form);
+  return {
+    topic: formData.get("topic"),
+    category: formData.get("category"),
+    sourceName: formData.get("sourceName"),
+    sourceUrl: formData.get("sourceUrl"),
+    sourceDate: formData.get("sourceDate"),
+    summary: formData.get("summary"),
+    keyInsights: formData.get("keyInsights"),
+    productImplications: formData.get("productImplications"),
+    interviewTransfer: formData.get("interviewTransfer"),
+    portfolioTransfer: formData.get("portfolioTransfer"),
+    openQuestions: formData.get("openQuestions"),
+    tags: formData.get("tags"),
+    status: formData.get("status"),
+    priority: formData.get("priority"),
+  };
+}
+
+async function submitAiFrontierCard(event) {
+  event.preventDefault();
+  if (state.savingAiFrontierCard) return;
+
+  const payload = formToAiFrontierCard(event.currentTarget);
+  if (state.aiFrontierCardDraft) {
+    state.aiFrontierCardDraft = { ...state.aiFrontierCardDraft, ...payload };
+  } else {
+    state.aiFrontierCards = state.aiFrontierCards.map((item) =>
+      item.id === state.selectedAiFrontierCardId ? { ...item, ...payload } : item,
+    );
+  }
+  state.savingAiFrontierCard = true;
+  render();
+
+  try {
+    const isNew = Boolean(state.aiFrontierCardDraft);
+    const path = isNew ? "/api/ai-frontier-cards" : `/api/ai-frontier-cards/${encodeURIComponent(state.selectedAiFrontierCardId)}`;
+    const method = isNew ? "POST" : "PUT";
+    const result = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    state.selectedAiFrontierCardId = result.aiFrontierCard.id;
+    state.aiFrontierCardDraft = null;
+    showToast("AI 前沿卡片已保存");
+    const list = await api("/api/ai-frontier-cards");
+    state.aiFrontierCards = list.aiFrontierCards || [];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingAiFrontierCard = false;
     render();
   }
 }
@@ -4611,6 +4782,154 @@ function renderAiAnalysisDetail(note) {
   `;
 }
 
+function renderAiFrontier() {
+  const data = aiFrontierMetrics();
+  const card = selectedAiFrontierCard();
+
+  return `
+    ${renderTopbar("AI 前沿思维框架", "把模型、产品、行业和方法论的前沿信号沉淀成可迁移的 AI PM 认知资产。", "08 AI Frontier")}
+    <section class="grid metrics compact-metrics">
+      <div class="metric"><div class="metric-label">卡片总数</div><div class="metric-value">${data.total}</div></div>
+      <div class="metric"><div class="metric-label">待消化</div><div class="metric-value">${data.inbox}</div></div>
+      <div class="metric"><div class="metric-label">已迁移</div><div class="metric-value">${data.mapped}</div></div>
+      <div class="metric"><div class="metric-label">高优先级</div><div class="metric-value">${data.high}</div></div>
+    </section>
+    <div class="workspace">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">前沿卡片</h2>
+            <p class="panel-subtitle">记录新模型、新产品、新论文、行业案例和产品判断框架。</p>
+          </div>
+          <button class="btn primary" id="new-ai-frontier-card-btn" type="button">新增卡片</button>
+        </div>
+        <div class="panel-body">${renderAiFrontierList()}</div>
+      </section>
+      ${renderAiFrontierDetail(card)}
+    </div>
+  `;
+}
+
+function renderAiFrontierList() {
+  if (!state.aiFrontierCards.length) {
+    return `<div class="empty">还没有 AI 前沿卡片。先记录一个你最近看到的新模型、新产品或行业案例。</div>`;
+  }
+
+  return `
+    <div class="work-list">
+      ${state.aiFrontierCards
+        .map(
+          (card) => `
+            <button class="work-item ${card.id === state.selectedAiFrontierCardId ? "active" : ""}" data-ai-frontier-card-id="${escapeHtml(card.id)}" type="button">
+              <div>
+                <p class="work-item-title">${escapeHtml(card.topic)}</p>
+                <p class="work-item-meta">${optionLabel(AI_FRONTIER_CATEGORIES, card.category)} · ${escapeHtml(card.sourceName || "未记录来源")}</p>
+              </div>
+              <span class="tag frontier-${card.status}">${optionLabel(AI_FRONTIER_STATUSES, card.status)}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderAiFrontierDetail(card) {
+  const isNew = Boolean(state.aiFrontierCardDraft);
+
+  if (!card) {
+    return `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">卡片详情</h2>
+            <p class="panel-subtitle">选择一张卡片，或新增第一张 AI 前沿卡片。</p>
+          </div>
+        </div>
+        <div class="panel-body"><div class="empty">当前没有选中的前沿卡片。</div></div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">${isNew ? "新增 AI 前沿卡片" : "AI 前沿卡片详情"}</h2>
+          <p class="panel-subtitle">保存后会写入 content/ai-frontier-cards 下的 Markdown 文件。</p>
+        </div>
+      </div>
+      <div class="panel-body">
+        <form id="ai-frontier-card-form" class="form-grid compact-form ai-frontier-form">
+          <div class="form-field full">
+            <label>主题</label>
+            <input name="topic" value="${escapeHtml(card.topic)}" placeholder="例如：多模态 Agent 对 AI PM 工作流的影响" required />
+          </div>
+          <div class="form-field">
+            <label>分类</label>
+            ${renderSelect("category", AI_FRONTIER_CATEGORIES, card.category)}
+          </div>
+          <div class="form-field">
+            <label>状态</label>
+            ${renderSelect("status", AI_FRONTIER_STATUSES, card.status)}
+          </div>
+          <div class="form-field">
+            <label>优先级</label>
+            ${renderSelect("priority", PRIORITIES, card.priority)}
+          </div>
+          <div class="form-field">
+            <label>来源日期</label>
+            <input name="sourceDate" type="date" value="${escapeHtml(card.sourceDate)}" />
+          </div>
+          <div class="form-field">
+            <label>来源名称</label>
+            <input name="sourceName" value="${escapeHtml(card.sourceName)}" placeholder="论文 / 产品 / 公司 / 文章" />
+          </div>
+          <div class="form-field">
+            <label>来源链接</label>
+            <input name="sourceUrl" value="${escapeHtml(card.sourceUrl)}" placeholder="https://..." />
+          </div>
+          <div class="form-field full">
+            <label>前沿摘要</label>
+            <textarea name="summary">${escapeHtml(card.summary)}</textarea>
+          </div>
+          <div class="form-field full">
+            <label>关键洞察</label>
+            <textarea name="keyInsights" class="tall-textarea">${escapeHtml(card.keyInsights)}</textarea>
+          </div>
+          <div class="form-field full">
+            <label>产品启发</label>
+            <textarea name="productImplications" class="tall-textarea">${escapeHtml(card.productImplications)}</textarea>
+          </div>
+          <div class="form-field full">
+            <label>面试迁移</label>
+            <textarea name="interviewTransfer" class="tall-textarea" placeholder="这张卡能迁移到哪些面试问题、观点或项目表达？">${escapeHtml(card.interviewTransfer)}</textarea>
+          </div>
+          <div class="form-field full">
+            <label>作品集迁移</label>
+            <textarea name="portfolioTransfer" placeholder="未来公开展示时，这个前沿认知可以怎样变成作品集内容？">${escapeHtml(card.portfolioTransfer)}</textarea>
+          </div>
+          <div class="form-field full">
+            <label>开放问题</label>
+            <textarea name="openQuestions" placeholder="还有哪些没想透的问题？">${escapeHtml(card.openQuestions)}</textarea>
+          </div>
+          <div class="form-field full">
+            <label>标签</label>
+            <input name="tags" value="${escapeHtml(card.tags)}" placeholder="Agent, 多模态, AI PM, 商业化" />
+          </div>
+          <div class="form-field full">
+            <div class="actions">
+              ${isNew ? `<button class="btn" id="cancel-ai-frontier-card-btn" type="button">取消</button>` : ""}
+              <button class="btn primary" type="submit">${state.savingAiFrontierCard ? "保存中..." : "保存前沿卡片"}</button>
+            </div>
+            <div class="status-line">${card.updatedAt ? `上次更新：${escapeHtml(card.updatedAt)}` : "保存后会写入 content/ai-frontier-cards。"}</div>
+          </div>
+        </form>
+      </div>
+    </section>
+  `;
+}
+
 function render() {
   let content;
   if (state.activeModule === "dashboard") content = renderDashboard();
@@ -4621,6 +4940,7 @@ function render() {
   if (state.activeModule === "projectAmmo") content = renderProjectAmmo();
   if (state.activeModule === "portfolio") content = renderPortfolio();
   if (state.activeModule === "aiAnalysis") content = renderAiAnalysis();
+  if (state.activeModule === "aiFrontier") content = renderAiFrontier();
 
   renderShell(content);
   attachCommonEvents();

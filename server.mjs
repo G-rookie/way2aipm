@@ -20,6 +20,7 @@ const EXPRESSION_DRILLS_DIR = path.join(CONTENT_DIR, "expression-drills");
 const PORTFOLIO_DIR = path.join(CONTENT_DIR, "portfolio");
 const PORTFOLIO_PROJECTS_DIR = path.join(CONTENT_DIR, "portfolio-projects");
 const AI_ANALYSIS_NOTES_DIR = path.join(CONTENT_DIR, "ai-analysis-notes");
+const AI_FRONTIER_CARDS_DIR = path.join(CONTENT_DIR, "ai-frontier-cards");
 const PORTFOLIO_PROFILE_ID = "portfolio_profile";
 
 const STAGES = new Set([
@@ -119,6 +120,17 @@ const AI_ANALYSIS_SOURCE_TYPES = new Set([
   "freeform",
 ]);
 const AI_ANALYSIS_STATUSES = new Set(["draft", "prompt_ready", "ai_responded", "decided", "archived"]);
+const AI_FRONTIER_CATEGORIES = new Set([
+  "model_capability",
+  "ai_product",
+  "agent_workflow",
+  "industry_case",
+  "research_paper",
+  "market_signal",
+  "pm_framework",
+  "other",
+]);
+const AI_FRONTIER_STATUSES = new Set(["inbox", "summarized", "mapped", "applied", "archived"]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -164,6 +176,7 @@ async function ensureContentDirs() {
   await mkdir(PORTFOLIO_DIR, { recursive: true });
   await mkdir(PORTFOLIO_PROJECTS_DIR, { recursive: true });
   await mkdir(AI_ANALYSIS_NOTES_DIR, { recursive: true });
+  await mkdir(AI_FRONTIER_CARDS_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -252,6 +265,13 @@ function createAiAnalysisNoteId(title) {
   return `ainote_${stamp}_${seed}_${random}`;
 }
 
+function createAiFrontierCardId(topic) {
+  const seed = slugify(topic);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `aifront_${stamp}_${seed}_${random}`;
+}
+
 function sanitizeId(id, prefix) {
   const value = String(id || "");
   const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
@@ -329,6 +349,12 @@ function aiAnalysisNotePath(id) {
   const safeId = sanitizeId(id, "ainote");
   if (!safeId) return null;
   return path.join(AI_ANALYSIS_NOTES_DIR, `${safeId}.md`);
+}
+
+function aiFrontierCardPath(id) {
+  const safeId = sanitizeId(id, "aifront");
+  if (!safeId) return null;
+  return path.join(AI_FRONTIER_CARDS_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -846,6 +872,41 @@ function normalizeAiAnalysisNote(input, existing = {}) {
   };
 }
 
+function normalizeAiFrontierCard(input, existing = {}) {
+  const now = new Date().toISOString();
+  const topic = String(input.topic ?? existing.topic ?? "").trim();
+  const category = AI_FRONTIER_CATEGORIES.has(input.category)
+    ? input.category
+    : existing.category || "other";
+  const status = AI_FRONTIER_STATUSES.has(input.status) ? input.status : existing.status || "inbox";
+  const priority = PRIORITIES.has(input.priority) ? input.priority : existing.priority || "medium";
+
+  if (!topic) {
+    throw new Error("topic is required");
+  }
+
+  return {
+    id: existing.id || input.id || createAiFrontierCardId(topic),
+    type: "aiFrontierCard",
+    topic,
+    category,
+    sourceName: String(input.sourceName ?? existing.sourceName ?? "").trim(),
+    sourceUrl: String(input.sourceUrl ?? existing.sourceUrl ?? "").trim(),
+    sourceDate: String(input.sourceDate ?? existing.sourceDate ?? "").trim(),
+    summary: String(input.summary ?? existing.summary ?? ""),
+    keyInsights: String(input.keyInsights ?? existing.keyInsights ?? ""),
+    productImplications: String(input.productImplications ?? existing.productImplications ?? ""),
+    interviewTransfer: String(input.interviewTransfer ?? existing.interviewTransfer ?? ""),
+    portfolioTransfer: String(input.portfolioTransfer ?? existing.portfolioTransfer ?? ""),
+    openQuestions: String(input.openQuestions ?? existing.openQuestions ?? ""),
+    tags: String(input.tags ?? existing.tags ?? "").trim(),
+    status,
+    priority,
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 function markdownEscapeTitle(value) {
   return String(value || "").replace(/\r?\n/g, " ").trim();
 }
@@ -940,6 +1001,13 @@ function aiAnalysisNoteToMarkdown(note) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 上下文快照\n\n${note.contextSnapshot}\n\n## 提示词草稿\n\n${note.promptDraft}\n\n## AI 输出\n\n${note.aiResponse}\n\n## 人工决策\n\n${note.humanDecision}\n\n## 下一步动作\n\n${note.nextAction}\n`;
 }
 
+function aiFrontierCardToMarkdown(card) {
+  const frontMatter = JSON.stringify(card, null, 2);
+  const title = markdownEscapeTitle(card.topic);
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 前沿摘要\n\n${card.summary}\n\n## 关键洞察\n\n${card.keyInsights}\n\n## 产品启发\n\n${card.productImplications}\n\n## 面试迁移\n\n${card.interviewTransfer}\n\n## 作品集迁移\n\n${card.portfolioTransfer}\n\n## 开放问题\n\n${card.openQuestions}\n\n## 标签\n\n${card.tags}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -1016,6 +1084,12 @@ async function readPortfolioProjectFile(filePath) {
 }
 
 async function readAiAnalysisNoteFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readAiFrontierCardFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -1474,6 +1548,51 @@ async function listAiAnalysisNotes(filters = {}) {
   return filtered;
 }
 
+async function listAiFrontierCards(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(AI_FRONTIER_CARDS_DIR, { withFileTypes: true });
+  const cards = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readAiFrontierCardFile(path.join(AI_FRONTIER_CARDS_DIR, entry.name));
+      if (item.type === "aiFrontierCard") {
+        cards.push(item);
+      }
+    } catch (error) {
+      cards.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "aiFrontierCard",
+        topic: "读取失败",
+        category: "other",
+        status: "inbox",
+        priority: "medium",
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = cards.filter((card) => {
+    if (filters.category && card.category !== filters.category) return false;
+    if (filters.status && card.status !== filters.status) return false;
+    if (filters.priority && card.priority !== filters.priority) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const statusOrder = { inbox: 0, summarized: 1, mapped: 2, applied: 3, archived: 4 };
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
+    const statusDiff = (statusOrder[a.status] ?? 5) - (statusOrder[b.status] ?? 5);
+    if (statusDiff) return statusDiff;
+    const priorityDiff = (priorityOrder[a.priority] ?? 3) - (priorityOrder[b.priority] ?? 3);
+    if (priorityDiff) return priorityDiff;
+    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  });
+  return filtered;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
@@ -1606,6 +1725,18 @@ async function getAiAnalysisNote(id) {
   }
 }
 
+async function getAiFrontierCard(id) {
+  const filePath = aiFrontierCardPath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readAiFrontierCardFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function saveOpportunity(opportunity) {
   await ensureContentDirs();
   const filePath = opportunityPath(opportunity.id);
@@ -1720,6 +1851,16 @@ async function saveAiAnalysisNote(note) {
   }
   await writeFile(filePath, aiAnalysisNoteToMarkdown(note), "utf8");
   return note;
+}
+
+async function saveAiFrontierCard(card) {
+  await ensureContentDirs();
+  const filePath = aiFrontierCardPath(card.id);
+  if (!filePath) {
+    throw new Error("Invalid AI frontier card id");
+  }
+  await writeFile(filePath, aiFrontierCardToMarkdown(card), "utf8");
+  return card;
 }
 
 function briefStatusToPreparationStatus(status) {
@@ -2555,6 +2696,47 @@ async function handleApi(req, res, url) {
     if (req.method === "POST") {
       const body = await readRequestBody(req);
       return sendJson(res, 200, await buildAiAnalysisContext(body));
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/ai-frontier-cards") {
+    if (req.method === "GET") {
+      const category = url.searchParams.get("category") || "";
+      const status = url.searchParams.get("status") || "";
+      const priority = url.searchParams.get("priority") || "";
+      const aiFrontierCards = await listAiFrontierCards({ category, status, priority });
+      return sendJson(res, 200, { aiFrontierCards });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const card = normalizeAiFrontierCard(body);
+      await saveAiFrontierCard(card);
+      return sendJson(res, 201, { aiFrontierCard: card });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const aiFrontierCardMatch = url.pathname.match(/^\/api\/ai-frontier-cards\/([^/]+)$/);
+  if (aiFrontierCardMatch) {
+    const id = decodeURIComponent(aiFrontierCardMatch[1]);
+
+    if (req.method === "GET") {
+      const card = await getAiFrontierCard(id);
+      if (!card) return notFound(res);
+      return sendJson(res, 200, { aiFrontierCard: card });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getAiFrontierCard(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      const card = normalizeAiFrontierCard({ ...body, id }, existing);
+      await saveAiFrontierCard(card);
+      return sendJson(res, 200, { aiFrontierCard: card });
     }
 
     return methodNotAllowed(res);
