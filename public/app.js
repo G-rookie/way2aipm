@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.11";
+const APP_VERSION = "v0.12";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -278,18 +278,19 @@ const RHYTHM_STATUSES = [
 ];
 
 const MODULES = [
-  ["dashboard", "总控台", "00"],
-  ["globalSearch", "全局检索", "⌕"],
+  ["dashboard", "总控调度器", "00"],
   ["pipeline", "求职中台", "01"],
   ["preInterview", "面试前作战室", "02"],
   ["postInterview", "面试后复盘室", "03"],
-  ["weakness", "缺陷与训练中心", "04"],
-  ["projectAmmo", "项目弹药库", "05"],
-  ["portfolio", "作品集产品线", "06"],
-  ["aiAnalysis", "AI 辅助分析", "07"],
-  ["aiFrontier", "AI 前沿框架", "08"],
+  ["projectAmmo", "项目弹药库", "04"],
+  ["weakness", "能力缺陷档案", "05"],
+  ["trainingPlan", "训练计划中心", "06"],
+  ["aiFrontier", "AI 前沿框架", "07"],
+  ["portfolio", "作品集产品线", "08"],
   ["rhythm", "节奏运营官", "09"],
   ["expressionLab", "表达训练室", "10"],
+  ["aiAnalysis", "AI 辅助分析", "AI"],
+  ["globalSearch", "全局检索", "⌕"],
 ];
 
 const GLOBAL_SEARCH_FILTERS = [
@@ -862,7 +863,11 @@ function selectedTrainingTask() {
 }
 
 function selectTrainingTask(id) {
+  const task = state.trainingTasks.find((item) => item.id === id);
   state.selectedTrainingTaskId = id;
+  if (task?.weaknessId) {
+    state.selectedWeaknessId = task.weaknessId;
+  }
   state.trainingTaskDraft = null;
   state.expressionDrillDraft = null;
   state.selectedExpressionDrillId = drillsForSource("training_task", id)[0]?.id || null;
@@ -1113,7 +1118,7 @@ function createGlobalSearchResults() {
         item.id,
         item.title,
         "训练任务",
-        [item.goal, item.practiceInput, item.acceptanceCriteria, item.resultNotes, item.nextAction].join(" "),
+        [item.targetAbility, item.practiceOutput, item.acceptanceCriteria, item.validationNote, item.dueAt].join(" "),
         item.updatedAt,
         [optionLabel(TRAINING_TASK_TYPES, item.taskType), optionLabel(TRAINING_TASK_STATUSES, item.status)],
       ),
@@ -1730,7 +1735,7 @@ function openWeakness(id) {
 function openTrainingTask(taskId) {
   const task = state.trainingTasks.find((item) => item.id === taskId);
   if (!task) return;
-  state.activeModule = "weakness";
+  state.activeModule = "trainingPlan";
   state.selectedWeaknessId = task.weaknessId;
   state.selectedTrainingTaskId = task.id;
   state.weaknessDraft = null;
@@ -1791,7 +1796,7 @@ function openExpressionDrill(drillId) {
   } else if (drill.sourceType === "training_task") {
     const task = state.trainingTasks.find((item) => item.id === drill.sourceId);
     if (task) {
-      state.activeModule = "weakness";
+      state.activeModule = "trainingPlan";
       state.selectedWeaknessId = task.weaknessId;
       state.selectedTrainingTaskId = task.id;
     }
@@ -1924,6 +1929,7 @@ function trainingTaskMetrics() {
   return {
     total: state.trainingTasks.length,
     active: state.trainingTasks.filter((task) => ["todo", "doing", "reviewing"].includes(task.status)).length,
+    reviewing: state.trainingTasks.filter((task) => task.status === "reviewing").length,
     validated: state.trainingTasks.filter((task) => task.status === "validated").length,
   };
 }
@@ -3190,7 +3196,7 @@ function formToTrainingTask(form) {
   const formData = new FormData(form);
   const weakness = selectedWeakness();
   return {
-    weaknessId: formData.get("weaknessId") || weakness?.id,
+    weaknessId: formData.get("weaknessId") || weakness?.id || selectedTrainingTask()?.weaknessId,
     title: formData.get("title"),
     taskType: formData.get("taskType"),
     targetAbility: formData.get("targetAbility"),
@@ -3231,6 +3237,7 @@ async function submitTrainingTask(event) {
       body: JSON.stringify(payload),
     });
     state.selectedTrainingTaskId = result.task.id;
+    state.selectedWeaknessId = result.task.weaknessId;
     state.trainingTaskDraft = null;
     showToast("训练任务已保存");
     const [taskList, weaknessList] = await Promise.all([
@@ -3839,7 +3846,7 @@ function renderGlobalSearch() {
   const query = state.globalSearchQuery.trim();
 
   return `
-    ${renderTopbar("全局检索", "跨模块查找岗位、面试、复盘、训练、项目、作品集和节奏记录，并直接跳回原工作区。", "11 Global Search")}
+    ${renderTopbar("全局检索", "跨模块查找岗位、面试、复盘、训练、项目、作品集和节奏记录，并直接跳回原工作区。", "Global Search")}
     <section class="grid metrics compact-metrics">
       <div class="metric"><div class="metric-label">可检索记录</div><div class="metric-value">${data.totalRecords}</div></div>
       <div class="metric"><div class="metric-label">当前结果</div><div class="metric-value">${data.visibleResults}</div></div>
@@ -4566,12 +4573,12 @@ function renderWeakness() {
   const taskData = trainingTaskMetrics();
   const weakness = selectedWeakness();
   return `
-    ${renderTopbar("缺陷与训练中心", "这里会承接复盘中的弱回答，沉淀成能力缺陷和训练任务。", "04 Weakness & Training")}
+    ${renderTopbar("能力缺陷档案", "这里会承接复盘中的弱回答，沉淀成可追踪、可修复、可验证的能力缺陷。", "05 Weakness Archive")}
     <section class="grid metrics compact-metrics">
       <div class="metric"><div class="metric-label">缺陷总数</div><div class="metric-value">${data.total}</div></div>
       <div class="metric"><div class="metric-label">待处理</div><div class="metric-value">${data.open}</div></div>
-      <div class="metric"><div class="metric-label">进行中训练</div><div class="metric-value">${taskData.active}</div></div>
-      <div class="metric"><div class="metric-label">已验证训练</div><div class="metric-value">${taskData.validated}</div></div>
+      <div class="metric"><div class="metric-label">修复中</div><div class="metric-value">${data.training}</div></div>
+      <div class="metric"><div class="metric-label">关联训练</div><div class="metric-value">${taskData.total}</div></div>
     </section>
     <div class="workspace">
       <section class="panel">
@@ -4696,7 +4703,7 @@ function renderProjectAmmo() {
   const ammo = selectedProjectAmmo();
 
   return `
-    ${renderTopbar("项目弹药库", "沉淀项目故事、关键证据、AI 相关性、可证明能力和高风险追问。", "05 Project Ammo")}
+    ${renderTopbar("项目弹药库", "沉淀项目故事、关键证据、AI 相关性、可证明能力和高风险追问。", "04 Project Ammo")}
     <section class="grid metrics compact-metrics">
       <div class="metric"><div class="metric-label">项目总数</div><div class="metric-value">${data.total}</div></div>
       <div class="metric"><div class="metric-label">可用于面试</div><div class="metric-value">${data.usable}</div></div>
@@ -5096,6 +5103,127 @@ function renderTrainingTaskSection(weakness) {
   `;
 }
 
+function renderTrainingPlan() {
+  const data = trainingTaskMetrics();
+  const task = selectedTrainingTask();
+  const weakness = task?.weaknessId ? state.weaknesses.find((item) => item.id === task.weaknessId) : selectedWeakness();
+
+  return `
+    ${renderTopbar("训练计划中心", "把缺陷修复拆成可执行、可验收、可回到面试验证的训练任务。", "06 Training Plan")}
+    <section class="grid metrics compact-metrics">
+      <div class="metric"><div class="metric-label">训练任务</div><div class="metric-value">${data.total}</div></div>
+      <div class="metric"><div class="metric-label">进行中</div><div class="metric-value">${data.active}</div></div>
+      <div class="metric"><div class="metric-label">待验收</div><div class="metric-value">${data.reviewing}</div></div>
+      <div class="metric"><div class="metric-label">已验证</div><div class="metric-value">${data.validated}</div></div>
+    </section>
+    <div class="workspace">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">全局训练任务</h2>
+            <p class="panel-subtitle">这里汇总所有从能力缺陷中拆出的修复任务。</p>
+          </div>
+        </div>
+        <div class="panel-body">${renderTrainingTaskGlobalList()}</div>
+      </section>
+      <div class="stack">
+        ${renderTrainingPlanDetail(task, weakness)}
+        ${task?.id ? renderExpressionDrillSectionForTrainingTask(task) : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderTrainingTaskGlobalList() {
+  if (!state.trainingTasks.length) {
+    return `<div class="empty">还没有训练任务。先从能力缺陷档案中选择一个缺陷，并创建可验收的修复任务。</div>`;
+  }
+
+  return `
+    <div class="work-list">
+      ${state.trainingTasks
+        .map((task) => {
+          const weakness = state.weaknesses.find((item) => item.id === task.weaknessId);
+          return `
+            <button class="work-item weakness-item ${task.id === state.selectedTrainingTaskId ? "active" : ""}" data-training-task-id="${escapeHtml(task.id)}" type="button">
+              <div>
+                <p class="work-item-title">${escapeHtml(task.title)}</p>
+                <p class="work-item-meta">${escapeHtml(weakness?.title || "未关联缺陷")} · ${optionLabel(TRAINING_TASK_TYPES, task.taskType)}${task.dueAt ? ` · ${escapeHtml(task.dueAt)}` : ""}</p>
+              </div>
+              <span class="tag task-${task.status}">${optionLabel(TRAINING_TASK_STATUSES, task.status)}</span>
+            </button>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderTrainingPlanDetail(task, weakness) {
+  if (!task) {
+    return `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">训练详情</h2>
+            <p class="panel-subtitle">选择一个训练任务，编辑目标能力、练习产物和验收标准。</p>
+          </div>
+        </div>
+        <div class="panel-body"><div class="empty">当前没有选中的训练任务。</div></div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">训练详情</h2>
+          <p class="panel-subtitle">训练任务仍保存到 content/training-tasks，不改变现有数据结构。</p>
+        </div>
+      </div>
+      <div class="panel-body stack">
+        ${
+          weakness
+            ? `<div class="linked-panel">
+                <div>
+                  <label>关联缺陷</label>
+                  <p class="mini-meta">${escapeHtml(weakness.title)} · ${optionLabel(WEAKNESS_STATUSES, weakness.status)}</p>
+                </div>
+                <button class="btn" data-dashboard-weakness-id="${escapeHtml(weakness.id)}" type="button">查看缺陷</button>
+              </div>`
+            : `<div class="empty">这个训练任务关联的能力缺陷没有读取到，可以检查 Markdown 中的 weaknessId。</div>`
+        }
+        ${renderTrainingTaskForm(weakness)}
+      </div>
+    </section>
+  `;
+}
+
+function renderExpressionDrillSectionForTrainingTask(task) {
+  const drills = drillsForSource("training_task", task.id);
+
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">表达训练入口</h2>
+          <p class="panel-subtitle">把训练任务继续固化成能稳定说出口的表达练习。</p>
+        </div>
+        ${!state.trainingTaskDraft ? `<button class="btn primary new-task-expression-drill-btn" type="button">从任务创建</button>` : ""}
+      </div>
+      <div class="panel-body stack">
+        ${
+          drills.length
+            ? renderExpressionDrillListForSource("training_task", task.id)
+            : `<div class="empty">还没有从这个训练任务创建表达训练。</div>`
+        }
+        ${selectedExpressionDrill()?.sourceType === "training_task" && selectedExpressionDrill()?.sourceId === task.id ? renderExpressionDrillFormForSource("training_task", task.id) : ""}
+      </div>
+    </section>
+  `;
+}
+
 function renderTrainingTaskList(weaknessId) {
   const tasks = tasksForWeakness(weaknessId);
   if (!tasks.length) {
@@ -5124,6 +5252,8 @@ function renderTrainingTaskList(weaknessId) {
 function renderTrainingTaskForm(weakness) {
   const task = selectedTrainingTask();
   const isNew = Boolean(state.trainingTaskDraft);
+  const weaknessId = weakness?.id || task?.weaknessId || "";
+  const weaknessTitle = weakness?.title || "未关联缺陷";
 
   if (!task) {
     return `<div class="empty">选择一个训练任务进行编辑，或新增第一条训练任务。</div>`;
@@ -5149,13 +5279,13 @@ function renderTrainingTaskForm(weakness) {
       </div>
       <div class="form-field">
         <label>关联缺陷</label>
-        <input value="${escapeHtml(weakness.title)}" disabled />
+        <input value="${escapeHtml(weaknessTitle)}" disabled />
       </div>
       ${renderBriefField("targetAbility", "目标能力", task.targetAbility, "这次训练要修复什么能力问题")}
       ${renderBriefField("practiceOutput", "练习产物", task.practiceOutput, "写下重写后的回答、模拟面试记录或练习结果")}
       ${renderBriefField("acceptanceCriteria", "验收标准", task.acceptanceCriteria, "怎样才算完成，最好可检查、可复盘")}
       ${renderBriefField("validationNote", "验证记录", task.validationNote, "后续面试或复盘中如何证明改善了")}
-      <input name="weaknessId" type="hidden" value="${escapeHtml(weakness.id)}" />
+      <input name="weaknessId" type="hidden" value="${escapeHtml(weaknessId)}" />
       <input name="relatedReviewId" type="hidden" value="${escapeHtml(task.relatedReviewId)}" />
       <input name="relatedInterviewRoundId" type="hidden" value="${escapeHtml(task.relatedInterviewRoundId)}" />
       <div class="form-field full">
@@ -5173,7 +5303,7 @@ function renderPortfolio() {
   const data = portfolioMetrics();
 
   return `
-    ${renderTopbar("作品集产品线", "把成熟项目弹药整理成未来可公开展示的作品集素材。", "06 Portfolio Line")}
+    ${renderTopbar("作品集产品线", "把成熟项目弹药整理成未来可公开展示的作品集素材。", "08 Portfolio Line")}
     <section class="grid metrics compact-metrics">
       <div class="metric"><div class="metric-label">项目卡总数</div><div class="metric-value">${data.total}</div></div>
       <div class="metric"><div class="metric-label">进入预览</div><div class="metric-value">${data.inPreview}</div></div>
@@ -5459,7 +5589,7 @@ function renderAiAnalysis() {
   const note = selectedAiAnalysisNote();
 
   return `
-    ${renderTopbar("AI 辅助分析", "生成可审查的上下文快照和可复制提示词，粘贴 AI 输出后记录你的人工决策。", "07 AI Assist")}
+    ${renderTopbar("AI 辅助分析", "生成可审查的上下文快照和可复制提示词，粘贴 AI 输出后记录你的人工决策。", "AI Assist")}
     <section class="grid metrics compact-metrics">
       <div class="metric"><div class="metric-label">记录总数</div><div class="metric-value">${data.total}</div></div>
       <div class="metric"><div class="metric-label">提示词就绪</div><div class="metric-value">${data.promptReady}</div></div>
@@ -5616,7 +5746,7 @@ function renderAiFrontier() {
   const card = selectedAiFrontierCard();
 
   return `
-    ${renderTopbar("AI 前沿思维框架", "把模型、产品、行业和方法论的前沿信号沉淀成可迁移的 AI PM 认知资产。", "08 AI Frontier")}
+    ${renderTopbar("AI 前沿思维框架", "把模型、产品、行业和方法论的前沿信号沉淀成可迁移的 AI PM 认知资产。", "07 AI Frontier")}
     <section class="grid metrics compact-metrics">
       <div class="metric"><div class="metric-label">卡片总数</div><div class="metric-value">${data.total}</div></div>
       <div class="metric"><div class="metric-label">待消化</div><div class="metric-value">${data.inbox}</div></div>
@@ -6084,6 +6214,7 @@ function render() {
   if (state.activeModule === "postInterview") content = renderPostInterview();
   if (state.activeModule === "weakness") content = renderWeakness();
   if (state.activeModule === "projectAmmo") content = renderProjectAmmo();
+  if (state.activeModule === "trainingPlan") content = renderTrainingPlan();
   if (state.activeModule === "portfolio") content = renderPortfolio();
   if (state.activeModule === "aiAnalysis") content = renderAiAnalysis();
   if (state.activeModule === "aiFrontier") content = renderAiFrontier();
