@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.13";
+const APP_VERSION = "v0.14";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -1929,6 +1929,123 @@ function reviewMetrics() {
     total: state.reviews.length,
     needsReview,
     followup: state.reviews.filter((review) => review.status === "needs_followup").length,
+  };
+}
+
+function nonEmptyLines(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function reviewCompletionItems(review) {
+  return [
+    ["actualQuestions", "实际问题", review.actualQuestions],
+    ["strongAnswers", "强回答", review.strongAnswers],
+    ["weakAnswers", "弱回答", review.weakAnswers],
+    ["failurePoints", "挂点分析", review.failurePoints],
+    ["interviewerSignals", "面试官信号", review.interviewerSignals],
+    ["summary", "总结", review.summary],
+  ].map(([key, label, value]) => ({
+    key,
+    label,
+    done: Boolean(String(value || "").trim()),
+  }));
+}
+
+function reviewCommitteeStats(review) {
+  const completionItems = reviewCompletionItems(review);
+  const completed = completionItems.filter((item) => item.done).length;
+  const strongCount = nonEmptyLines(review.strongAnswers).length;
+  const weakCount = nonEmptyLines(review.weakAnswers).length;
+  const failureCount = nonEmptyLines(review.failurePoints).length;
+  const questionCount = nonEmptyLines(review.actualQuestions).length;
+  const hasWeakSignal = weakCount > 0 || failureCount > 0 || ["weak", "failed"].includes(review.selfRating);
+
+  return {
+    completionItems,
+    completed,
+    total: completionItems.length,
+    completionRate: Math.round((completed / completionItems.length) * 100),
+    strongCount,
+    weakCount,
+    failureCount,
+    questionCount,
+    hasWeakSignal,
+  };
+}
+
+function reviewFailureCategories(review) {
+  const text = searchText([review.weakAnswers, review.failurePoints, review.summary]);
+  const categories = [
+    {
+      key: "project_depth",
+      label: "项目深挖不足",
+      terms: ["项目", "细节", "数据", "指标", "证据", "追问", "落地", "过程"],
+    },
+    {
+      key: "product_thinking",
+      label: "产品判断不足",
+      terms: ["产品", "需求", "用户", "优先级", "取舍", "方案", "价值", "体验"],
+    },
+    {
+      key: "ai_understanding",
+      label: "AI 理解不足",
+      terms: ["ai", "模型", "算法", "llm", "agent", "rag", "prompt", "大模型", "智能体"],
+    },
+    {
+      key: "business_sense",
+      label: "业务判断不足",
+      terms: ["业务", "商业", "增长", "收入", "成本", "市场", "行业", "转化"],
+    },
+    {
+      key: "communication",
+      label: "表达稳定性不足",
+      terms: ["表达", "结构", "卡", "紧张", "啰嗦", "混乱", "不稳", "说不清"],
+    },
+  ];
+
+  const matched = categories
+    .map((category) => ({
+      ...category,
+      score: category.terms.filter((term) => text.includes(term)).length,
+    }))
+    .filter((category) => category.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return matched.length ? matched : [{ key: "other", label: "其他待判断", score: 0 }];
+}
+
+function reviewClosureAdvice(review) {
+  const stats = reviewCommitteeStats(review);
+  const linkedWeaknessCount = (review.linkedWeaknessIds || []).length;
+
+  if (review.status === "draft" || stats.completionRate < 70) {
+    return {
+      tone: "attention",
+      title: "先补齐复盘证据",
+      body: "建议先把实际问题、弱回答和挂点分析补完整，再沉淀缺陷。",
+    };
+  }
+  if (stats.hasWeakSignal && linkedWeaknessCount === 0) {
+    return {
+      tone: "attention",
+      title: "建议创建能力缺陷",
+      body: "本轮已经出现弱回答或挂点，但还没有关联缺陷，可以从这轮复盘生成修复对象。",
+    };
+  }
+  if (linkedWeaknessCount > 0) {
+    return {
+      tone: "done",
+      title: "已经进入缺陷闭环",
+      body: `本轮已关联 ${linkedWeaknessCount} 个能力缺陷，下一步应进入训练计划中心安排修复。`,
+    };
+  }
+  return {
+    tone: "done",
+    title: "复盘记录较完整",
+    body: "当前没有明显待闭环挂点，可以继续观察后续面试验证结果。",
   };
 }
 
@@ -4597,6 +4714,7 @@ function renderReviewForm(interview) {
         </div>
       </div>
       <div class="panel-body">
+        ${renderReviewCommittee(review)}
         <form id="review-form" class="form-grid brief-form">
           <div class="form-field">
             <label>复盘状态</label>
@@ -4639,6 +4757,75 @@ function renderReviewForm(interview) {
         </form>
       </div>
     </section>
+  `;
+}
+
+function renderReviewCommittee(review) {
+  const stats = reviewCommitteeStats(review);
+  const categories = reviewFailureCategories(review);
+  const advice = reviewClosureAdvice(review);
+
+  return `
+    <section class="review-committee">
+      <div class="section-heading">
+        <div>
+          <h3>复盘评审委员会</h3>
+          <p>用同一套口径检查复盘完整度、回答表现和缺陷闭环。</p>
+        </div>
+        <span class="tag review-score">${stats.completionRate}% 完整</span>
+      </div>
+      <div class="review-committee-grid">
+        <div class="committee-card">
+          <div class="committee-card-head">
+            <span>证据完整度</span>
+            <strong>${stats.completed}/${stats.total}</strong>
+          </div>
+          <div class="committee-checks">
+            ${stats.completionItems
+              .map(
+                (item) => `
+                  <span class="committee-check ${item.done ? "done" : "todo"}">
+                    ${item.done ? "已记录" : "待补充"} · ${item.label}
+                  </span>
+                `,
+              )
+              .join("")}
+          </div>
+        </div>
+        <div class="committee-card">
+          <div class="committee-card-head">
+            <span>回答评级</span>
+            <strong>${optionLabel(REVIEW_SELF_RATINGS, review.selfRating)}</strong>
+          </div>
+          <div class="answer-stats">
+            <div><span>实际问题</span><strong>${stats.questionCount}</strong></div>
+            <div><span>强回答</span><strong>${stats.strongCount}</strong></div>
+            <div><span>弱回答</span><strong>${stats.weakCount}</strong></div>
+            <div><span>挂点</span><strong>${stats.failureCount}</strong></div>
+          </div>
+          <p class="mini-meta">面试结果：${optionLabel(REVIEW_RESULTS, review.result)}</p>
+        </div>
+        <div class="committee-card">
+          <div class="committee-card-head">
+            <span>挂点分类建议</span>
+            <strong>${categories[0]?.label || "待判断"}</strong>
+          </div>
+          <div class="tag-row">
+            ${categories
+              .map((category) => `<span class="tag review-category">${escapeHtml(category.label)}</span>`)
+              .join("")}
+          </div>
+          <p class="mini-meta">根据弱回答、挂点分析和总结中的关键词做启发式判断。</p>
+        </div>
+      </div>
+      <div class="closure-advice ${advice.tone}">
+        <div>
+          <strong>${escapeHtml(advice.title)}</strong>
+          <p>${escapeHtml(advice.body)}</p>
+        </div>
+      </div>
+    </section>
+    <div class="detail-divider"></div>
   `;
 }
 
