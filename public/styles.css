@@ -405,6 +405,27 @@ h1 {
   color: var(--muted);
 }
 
+.tag.due-overdue {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.tag.due-today,
+.tag.due-soon {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.tag.due-future {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.tag.due-none {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
 .tag.priority-high,
 .tag.risk-high {
   background: var(--red-bg);
@@ -886,6 +907,44 @@ textarea:focus {
   background: #fbfaf5;
 }
 
+.training-closure-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.closure-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 11px;
+  background: var(--surface);
+}
+
+.closure-item span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.closure-item strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.closure-item.done {
+  border-color: rgba(22, 101, 52, 0.24);
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.closure-item.attention {
+  border-color: rgba(180, 83, 9, 0.24);
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
 .compact-form textarea {
   min-height: 88px;
 }
@@ -900,9 +959,50 @@ textarea:focus {
   margin: 0 0 14px;
 }
 
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.training-tabs {
+  margin: 0 0 16px;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 11px;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.tab:hover,
+.tab.active {
+  border-color: var(--ink);
+  color: var(--ink);
+  box-shadow: 0 8px 20px rgba(36, 31, 24, 0.07);
+}
+
+.tab span {
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 11px;
+}
+
 .work-list {
   display: grid;
   gap: 10px;
+}
+
+.inline-tags {
+  justify-content: flex-end;
 }
 
 .dispatch-list {
@@ -1175,6 +1275,7 @@ textarea:focus {
   .dashboard-workspace,
   .dashboard-grid,
   .pre-interview-layout,
+  .training-closure-grid,
   .placeholder-grid,
   .portfolio-preview-grid {
     grid-template-columns: 1fr;

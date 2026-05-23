@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.12";
+const APP_VERSION = "v0.13";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -311,6 +311,21 @@ const GLOBAL_SEARCH_FILTERS = [
   ["rhythm", "个人节奏"],
 ];
 
+const TRAINING_PLAN_VIEWS = [
+  ["overview", "总览"],
+  ["week", "本周"],
+  ["reviewing", "待验收"],
+  ["validated", "已验证"],
+];
+
+const DUE_BUCKET_LABELS = [
+  ["overdue", "已逾期"],
+  ["today", "今天到期"],
+  ["soon", "7 天内"],
+  ["future", "未来"],
+  ["none", "未设截止"],
+];
+
 const EMPTY_OPPORTUNITY = {
   companyName: "",
   roleTitle: "",
@@ -574,6 +589,7 @@ const state = {
   selectedExpressionSessionId: null,
   globalSearchQuery: "",
   globalSearchFilter: "all",
+  trainingPlanView: "overview",
   selectedPortfolioProjectId: null,
   selectedAiAnalysisNoteId: null,
   selectedAiFrontierCardId: null,
@@ -1926,12 +1942,53 @@ function weaknessMetrics() {
 }
 
 function trainingTaskMetrics() {
+  const weekBuckets = new Set(["overdue", "today", "soon"]);
   return {
     total: state.trainingTasks.length,
     active: state.trainingTasks.filter((task) => ["todo", "doing", "reviewing"].includes(task.status)).length,
     reviewing: state.trainingTasks.filter((task) => task.status === "reviewing").length,
     validated: state.trainingTasks.filter((task) => task.status === "validated").length,
+    overdue: state.trainingTasks.filter((task) => dateBucket(task.dueAt) === "overdue").length,
+    week: state.trainingTasks.filter((task) => weekBuckets.has(dateBucket(task.dueAt))).length,
   };
+}
+
+function taskDueBucket(task) {
+  return dateBucket(task?.dueAt);
+}
+
+function trainingTaskWeakness(task) {
+  return state.weaknesses.find((item) => item.id === task?.weaknessId) || null;
+}
+
+function trainingTaskReadiness(task) {
+  return {
+    hasPracticeOutput: Boolean(String(task?.practiceOutput || "").trim()),
+    hasAcceptanceCriteria: Boolean(String(task?.acceptanceCriteria || "").trim()),
+    hasValidationNote: Boolean(String(task?.validationNote || "").trim()),
+  };
+}
+
+function filteredTrainingTasks() {
+  const view = state.trainingPlanView || "overview";
+  const weekBuckets = new Set(["overdue", "today", "soon"]);
+
+  return state.trainingTasks
+    .filter((task) => {
+      if (view === "week") return weekBuckets.has(taskDueBucket(task));
+      if (view === "reviewing") return task.status === "reviewing";
+      if (view === "validated") return task.status === "validated";
+      return true;
+    })
+    .sort((a, b) => {
+      const statusOrder = { reviewing: 0, doing: 1, todo: 2, validated: 3, done: 4, cancelled: 5 };
+      const bucketOrder = { overdue: 0, today: 1, soon: 2, future: 3, none: 4 };
+      const statusDiff = (statusOrder[a.status] ?? 6) - (statusOrder[b.status] ?? 6);
+      if (statusDiff) return statusDiff;
+      const bucketDiff = (bucketOrder[taskDueBucket(a)] ?? 5) - (bucketOrder[taskDueBucket(b)] ?? 5);
+      if (bucketDiff) return bucketDiff;
+      return String(a.dueAt || a.updatedAt || "").localeCompare(String(b.dueAt || b.updatedAt || ""));
+    });
 }
 
 function projectAmmoMetrics() {
@@ -1952,8 +2009,8 @@ function dateBucket(value) {
   const days = Math.round((due.getTime() - today.getTime()) / 86400000);
   if (days < 0) return "overdue";
   if (days === 0) return "today";
-  if (days <= 3) return "soon";
-  return "later";
+  if (days <= 7) return "soon";
+  return "future";
 }
 
 function dueLabel(value) {
@@ -1963,8 +2020,9 @@ function dueLabel(value) {
   const suffixes = {
     overdue: "已逾期",
     today: "今天",
-    soon: "3 天内",
-    later: "计划中",
+    soon: "7 天内",
+    future: "计划中",
+    none: "未设截止",
   };
   return `${dateText} · ${suffixes[bucket] || "计划中"}`;
 }
@@ -2625,6 +2683,22 @@ function attachCommonEvents() {
     state.globalSearchQuery = "";
     state.globalSearchFilter = "all";
     render();
+  });
+  document.querySelectorAll("[data-training-plan-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.trainingPlanView = button.dataset.trainingPlanView;
+      const tasks = filteredTrainingTasks();
+      if (!tasks.some((task) => task.id === state.selectedTrainingTaskId)) {
+        state.selectedTrainingTaskId = tasks[0]?.id || null;
+        if (state.selectedTrainingTaskId) {
+          const task = state.trainingTasks.find((item) => item.id === state.selectedTrainingTaskId);
+          state.selectedWeaknessId = task?.weaknessId || state.selectedWeaknessId;
+        }
+      }
+      state.trainingTaskDraft = null;
+      state.expressionDrillDraft = null;
+      render();
+    });
   });
   document.querySelectorAll("[data-global-search-result]").forEach((button) => {
     button.addEventListener("click", () => openGlobalSearchResult(button.dataset.globalSearchResult));
@@ -5107,24 +5181,26 @@ function renderTrainingPlan() {
   const data = trainingTaskMetrics();
   const task = selectedTrainingTask();
   const weakness = task?.weaknessId ? state.weaknesses.find((item) => item.id === task.weaknessId) : selectedWeakness();
+  const filteredTasks = filteredTrainingTasks();
 
   return `
     ${renderTopbar("训练计划中心", "把缺陷修复拆成可执行、可验收、可回到面试验证的训练任务。", "06 Training Plan")}
     <section class="grid metrics compact-metrics">
       <div class="metric"><div class="metric-label">训练任务</div><div class="metric-value">${data.total}</div></div>
-      <div class="metric"><div class="metric-label">进行中</div><div class="metric-value">${data.active}</div></div>
+      <div class="metric"><div class="metric-label">本周到期</div><div class="metric-value">${data.week}</div></div>
       <div class="metric"><div class="metric-label">待验收</div><div class="metric-value">${data.reviewing}</div></div>
       <div class="metric"><div class="metric-label">已验证</div><div class="metric-value">${data.validated}</div></div>
     </section>
+    ${renderTrainingPlanTabs(data)}
     <div class="workspace">
       <section class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">全局训练任务</h2>
-            <p class="panel-subtitle">这里汇总所有从能力缺陷中拆出的修复任务。</p>
+            <h2 class="panel-title">${optionLabel(TRAINING_PLAN_VIEWS, state.trainingPlanView)}训练任务</h2>
+            <p class="panel-subtitle">当前视图 ${filteredTasks.length} 条，按验收优先级和截止时间排序。</p>
           </div>
         </div>
-        <div class="panel-body">${renderTrainingTaskGlobalList()}</div>
+        <div class="panel-body">${renderTrainingTaskGlobalList(filteredTasks)}</div>
       </section>
       <div class="stack">
         ${renderTrainingPlanDetail(task, weakness)}
@@ -5134,23 +5210,51 @@ function renderTrainingPlan() {
   `;
 }
 
-function renderTrainingTaskGlobalList() {
+function renderTrainingPlanTabs(data) {
+  const counts = {
+    overview: data.total,
+    week: data.week,
+    reviewing: data.reviewing,
+    validated: data.validated,
+  };
+
+  return `
+    <div class="tabs training-tabs">
+      ${TRAINING_PLAN_VIEWS.map(
+        ([key, label]) => `
+          <button class="tab ${state.trainingPlanView === key ? "active" : ""}" data-training-plan-view="${key}" type="button">
+            ${label}<span>${counts[key] ?? 0}</span>
+          </button>
+        `,
+      ).join("")}
+    </div>
+  `;
+}
+
+function renderTrainingTaskGlobalList(tasks = filteredTrainingTasks()) {
   if (!state.trainingTasks.length) {
     return `<div class="empty">还没有训练任务。先从能力缺陷档案中选择一个缺陷，并创建可验收的修复任务。</div>`;
+  }
+  if (!tasks.length) {
+    return `<div class="empty">当前视图没有训练任务。可以切换到“总览”，或回到能力缺陷档案创建新任务。</div>`;
   }
 
   return `
     <div class="work-list">
-      ${state.trainingTasks
+      ${tasks
         .map((task) => {
-          const weakness = state.weaknesses.find((item) => item.id === task.weaknessId);
+          const weakness = trainingTaskWeakness(task);
+          const bucket = taskDueBucket(task);
           return `
             <button class="work-item weakness-item ${task.id === state.selectedTrainingTaskId ? "active" : ""}" data-training-task-id="${escapeHtml(task.id)}" type="button">
               <div>
                 <p class="work-item-title">${escapeHtml(task.title)}</p>
-                <p class="work-item-meta">${escapeHtml(weakness?.title || "未关联缺陷")} · ${optionLabel(TRAINING_TASK_TYPES, task.taskType)}${task.dueAt ? ` · ${escapeHtml(task.dueAt)}` : ""}</p>
+                <p class="work-item-meta">${escapeHtml(weakness?.title || "未关联缺陷")} · ${optionLabel(TRAINING_TASK_TYPES, task.taskType)}${task.dueAt ? ` · ${escapeHtml(dueLabel(task.dueAt))}` : " · 未设截止"}</p>
               </div>
-              <span class="tag task-${task.status}">${optionLabel(TRAINING_TASK_STATUSES, task.status)}</span>
+              <div class="tag-row inline-tags">
+                <span class="tag due-${bucket}">${optionLabel(DUE_BUCKET_LABELS, bucket)}</span>
+                <span class="tag task-${task.status}">${optionLabel(TRAINING_TASK_STATUSES, task.status)}</span>
+              </div>
             </button>
           `;
         })
@@ -5173,6 +5277,8 @@ function renderTrainingPlanDetail(task, weakness) {
       </section>
     `;
   }
+  const readiness = trainingTaskReadiness(task);
+  const bucket = taskDueBucket(task);
 
   return `
     <section class="panel">
@@ -5194,6 +5300,24 @@ function renderTrainingPlanDetail(task, weakness) {
               </div>`
             : `<div class="empty">这个训练任务关联的能力缺陷没有读取到，可以检查 Markdown 中的 weaknessId。</div>`
         }
+        <div class="training-closure-grid">
+          <div class="closure-item ${bucket === "overdue" ? "attention" : ""}">
+            <span>截止状态</span>
+            <strong>${optionLabel(DUE_BUCKET_LABELS, bucket)}</strong>
+          </div>
+          <div class="closure-item ${readiness.hasPracticeOutput ? "done" : "attention"}">
+            <span>练习产物</span>
+            <strong>${readiness.hasPracticeOutput ? "已填写" : "待补充"}</strong>
+          </div>
+          <div class="closure-item ${readiness.hasAcceptanceCriteria ? "done" : "attention"}">
+            <span>验收标准</span>
+            <strong>${readiness.hasAcceptanceCriteria ? "已填写" : "待补充"}</strong>
+          </div>
+          <div class="closure-item ${readiness.hasValidationNote ? "done" : "attention"}">
+            <span>验证记录</span>
+            <strong>${readiness.hasValidationNote ? "已填写" : "待验证"}</strong>
+          </div>
+        </div>
         ${renderTrainingTaskForm(weakness)}
       </div>
     </section>
