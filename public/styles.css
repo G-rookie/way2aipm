@@ -247,6 +247,12 @@ h1 {
   font-weight: 800;
 }
 
+.metric-value.small {
+  font-size: 18px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);
@@ -387,6 +393,16 @@ h1 {
   padding: 3px 8px;
   font-size: 11px;
   font-weight: 800;
+}
+
+.tag.search-kind {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.tag.muted {
+  background: var(--surface-2);
+  color: var(--muted);
 }
 
 .tag.priority-high,
@@ -969,6 +985,44 @@ textarea:focus {
   font-size: 12px;
 }
 
+.search-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.42fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.search-form {
+  display: grid;
+  gap: 14px;
+}
+
+.search-result {
+  align-items: flex-start;
+  text-align: left;
+}
+
+.search-result-main {
+  min-width: 0;
+}
+
+.search-result-content {
+  max-width: 880px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.search-result-tags {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 280px;
+}
+
 .placeholder-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1117,6 +1171,7 @@ textarea:focus {
 
 @media (max-width: 1120px) {
   .workspace,
+  .search-layout,
   .dashboard-workspace,
   .dashboard-grid,
   .pre-interview-layout,

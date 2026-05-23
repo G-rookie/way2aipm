@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.10";
+const APP_VERSION = "v0.11";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -279,6 +279,7 @@ const RHYTHM_STATUSES = [
 
 const MODULES = [
   ["dashboard", "总控台", "00"],
+  ["globalSearch", "全局检索", "⌕"],
   ["pipeline", "求职中台", "01"],
   ["preInterview", "面试前作战室", "02"],
   ["postInterview", "面试后复盘室", "03"],
@@ -289,6 +290,24 @@ const MODULES = [
   ["aiFrontier", "AI 前沿框架", "08"],
   ["rhythm", "节奏运营官", "09"],
   ["expressionLab", "表达训练室", "10"],
+];
+
+const GLOBAL_SEARCH_FILTERS = [
+  ["all", "全部内容"],
+  ["opportunity", "岗位机会"],
+  ["interview", "面试轮次"],
+  ["brief", "面试前 Brief"],
+  ["review", "面试复盘"],
+  ["weakness", "能力缺陷"],
+  ["trainingTask", "训练任务"],
+  ["projectAmmo", "项目弹药"],
+  ["followUpQuestion", "项目追问"],
+  ["expressionDrill", "表达训练"],
+  ["expressionSession", "练习记录"],
+  ["portfolioProject", "作品集项目"],
+  ["aiAnalysis", "AI 分析"],
+  ["aiFrontier", "AI 前沿"],
+  ["rhythm", "个人节奏"],
 ];
 
 const EMPTY_OPPORTUNITY = {
@@ -552,6 +571,8 @@ const state = {
   selectedFollowUpQuestionId: null,
   selectedExpressionDrillId: null,
   selectedExpressionSessionId: null,
+  globalSearchQuery: "",
+  globalSearchFilter: "all",
   selectedPortfolioProjectId: null,
   selectedAiAnalysisNoteId: null,
   selectedAiFrontierCardId: null,
@@ -977,6 +998,271 @@ function expressionLabMetrics() {
   };
 }
 
+function searchText(parts) {
+  return parts
+    .filter((part) => part !== undefined && part !== null)
+    .map((part) => String(part))
+    .join(" ")
+    .toLowerCase();
+}
+
+function matchesSearchQuery(text, query) {
+  const terms = query
+    .toLowerCase()
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter(Boolean);
+  if (!terms.length) return true;
+  return terms.every((term) => text.includes(term));
+}
+
+function createSearchResult(type, id, title, meta, content, updatedAt, badges = []) {
+  const typeLabel = optionLabel(GLOBAL_SEARCH_FILTERS, type);
+  return {
+    key: `${type}:${id}`,
+    type,
+    id,
+    title: title || "未命名记录",
+    meta,
+    content,
+    updatedAt,
+    badges: badges.filter(Boolean),
+    searchable: searchText([type, typeLabel, title, meta, content, updatedAt, ...badges]),
+  };
+}
+
+function createGlobalSearchResults() {
+  const query = state.globalSearchQuery.trim();
+  const filter = state.globalSearchFilter || "all";
+  const results = [];
+
+  state.opportunities.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "opportunity",
+        item.id,
+        `${item.companyName} - ${item.roleTitle}`,
+        "求职中台",
+        [item.source, item.nextAction, item.jdUrl, item.jdText, item.notes].join(" "),
+        item.updatedAt,
+        [optionLabel(STAGES, item.stage), optionLabel(PRIORITIES, item.priority), optionLabel(RISK_LEVELS, item.riskLevel)],
+      ),
+    );
+  });
+
+  state.interviews.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "interview",
+        item.id,
+        `${item.companyName || "未知公司"} - ${item.roundName || optionLabel(ROUND_TYPES, item.roundType)}`,
+        "面试轮次",
+        [item.roleTitle, item.interviewer, item.location, item.nextAction, item.notes].join(" "),
+        item.updatedAt,
+        [optionLabel(ROUND_TYPES, item.roundType), optionLabel(INTERVIEW_STATUSES, item.status)],
+      ),
+    );
+  });
+
+  state.briefs.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "brief",
+        item.id,
+        item.companyName ? `${item.companyName} - 面试前 Brief` : "面试前 Brief",
+        "面试前作战室",
+        [item.roleTitle, item.companyResearch, item.jdBreakdown, item.questionPrediction, item.projectMapping, item.riskChecklist, item.prepNotes].join(" "),
+        item.updatedAt,
+        [optionLabel(BRIEF_STATUSES, item.status)],
+      ),
+    );
+  });
+
+  state.reviews.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "review",
+        item.id,
+        item.companyName ? `${item.companyName} - 面试复盘` : "面试复盘",
+        "面试后复盘室",
+        [item.roleTitle, item.overallSummary, item.questionLog, item.stuckPoints, item.answerRating, item.nextFixPlan, item.notes].join(" "),
+        item.updatedAt,
+        [optionLabel(REVIEW_STATUSES, item.status), optionLabel(REVIEW_SELF_RATINGS, item.selfRating)],
+      ),
+    );
+  });
+
+  state.weaknesses.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "weakness",
+        item.id,
+        item.title,
+        "缺陷与训练中心",
+        [item.description, item.evidence, item.fixPlan, item.validationSignal, item.notes].join(" "),
+        item.updatedAt,
+        [optionLabel(WEAKNESS_CATEGORIES, item.category), optionLabel(WEAKNESS_STATUSES, item.status)],
+      ),
+    );
+  });
+
+  state.trainingTasks.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "trainingTask",
+        item.id,
+        item.title,
+        "训练任务",
+        [item.goal, item.practiceInput, item.acceptanceCriteria, item.resultNotes, item.nextAction].join(" "),
+        item.updatedAt,
+        [optionLabel(TRAINING_TASK_TYPES, item.taskType), optionLabel(TRAINING_TASK_STATUSES, item.status)],
+      ),
+    );
+  });
+
+  state.projectAmmos.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "projectAmmo",
+        item.id,
+        item.projectName,
+        "项目弹药库",
+        [item.role, item.period, item.background, item.goal, item.actions, item.result, item.metrics, item.evidence, item.reflection, item.highlights, item.risks].join(" "),
+        item.updatedAt,
+        [optionLabel(PROJECT_TYPES, item.projectType), optionLabel(PROJECT_AMMO_STATUSES, item.status)],
+      ),
+    );
+  });
+
+  state.followUpQuestions.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "followUpQuestion",
+        item.id,
+        item.question,
+        "项目追问",
+        [item.answerDraft, item.stableAnswer, item.riskPoint, item.nextAction].join(" "),
+        item.updatedAt,
+        [optionLabel(FOLLOW_UP_QUESTION_TYPES, item.questionType), optionLabel(FOLLOW_UP_QUESTION_STATUSES, item.status)],
+      ),
+    );
+  });
+
+  state.expressionDrills.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "expressionDrill",
+        item.id,
+        item.question,
+        "表达训练",
+        [item.targetAnswer, item.practiceRecord, item.feedback, item.nextAction].join(" "),
+        item.updatedAt,
+        [optionLabel(EXPRESSION_DRILL_SOURCE_TYPES, item.sourceType), optionLabel(EXPRESSION_DRILL_STATUSES, item.status), optionLabel(EXPRESSION_DRILL_SCORES, item.score)],
+      ),
+    );
+  });
+
+  state.expressionSessions.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "expressionSession",
+        item.id,
+        item.question,
+        "表达练习记录",
+        [item.blockers, item.improvedAnswer, item.reviewerNote, item.stabilityEvidence, item.nextAction].join(" "),
+        item.updatedAt || item.practicedAt,
+        [optionLabel(EXPRESSION_SESSION_ATTEMPT_TYPES, item.attemptType), optionLabel(EXPRESSION_SESSION_STATUSES, item.status), optionLabel(EXPRESSION_DRILL_SCORES, item.selfRating)],
+      ),
+    );
+  });
+
+  state.portfolioProjects.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "portfolioProject",
+        item.id,
+        item.displayTitle || item.projectName,
+        "作品集项目",
+        [item.subtitle, item.summary, item.problem, item.solution, item.impact, item.metrics, item.skills, item.evidence, item.privacyNote].join(" "),
+        item.updatedAt,
+        [item.visibility, item.readiness],
+      ),
+    );
+  });
+
+  state.aiAnalysisNotes.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "aiAnalysis",
+        item.id,
+        item.title,
+        "AI 辅助分析",
+        [item.sourceTitle, item.contextSnapshot, item.promptDraft, item.aiResponse, item.humanDecision, item.nextAction].join(" "),
+        item.updatedAt,
+        [optionLabel(AI_ANALYSIS_TYPES, item.analysisType), optionLabel(AI_ANALYSIS_STATUSES, item.status)],
+      ),
+    );
+  });
+
+  state.aiFrontierCards.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "aiFrontier",
+        item.id,
+        item.topic,
+        "AI 前沿思维框架",
+        [item.sourceName, item.sourceUrl, item.summary, item.keyInsights, item.productImplications, item.interviewTransfer, item.portfolioTransfer, item.openQuestions, item.tags].join(" "),
+        item.updatedAt,
+        [optionLabel(AI_FRONTIER_CATEGORIES, item.category), optionLabel(AI_FRONTIER_STATUSES, item.status), optionLabel(PRIORITIES, item.priority)],
+      ),
+    );
+  });
+
+  state.rhythmLogs.forEach((item) => {
+    results.push(
+      createSearchResult(
+        "rhythm",
+        item.id,
+        item.title || item.date || "个人节奏记录",
+        "个人节奏运营官",
+        [item.plannedFocus, item.recoveryAction, item.nextAdjustment, item.notes].join(" "),
+        item.updatedAt || item.date,
+        [optionLabel(RHYTHM_STATUSES, item.status), `风险 ${optionLabel(RHYTHM_LEVELS, item.rhythmRisk)}`],
+      ),
+    );
+  });
+
+  return results
+    .filter((item) => (filter === "all" || item.type === filter) && matchesSearchQuery(item.searchable, query))
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+    .slice(0, query ? 80 : 24);
+}
+
+function globalSearchMetrics() {
+  const allResults = createGlobalSearchResults();
+  const totalRecords =
+    state.opportunities.length +
+    state.interviews.length +
+    state.briefs.length +
+    state.reviews.length +
+    state.weaknesses.length +
+    state.trainingTasks.length +
+    state.projectAmmos.length +
+    state.followUpQuestions.length +
+    state.expressionDrills.length +
+    state.expressionSessions.length +
+    state.portfolioProjects.length +
+    state.aiAnalysisNotes.length +
+    state.aiFrontierCards.length +
+    state.rhythmLogs.length;
+
+  return {
+    totalRecords,
+    visibleResults: allResults.length,
+    activeFilter: optionLabel(GLOBAL_SEARCH_FILTERS, state.globalSearchFilter),
+  };
+}
+
 function selectProjectAmmo(id) {
   state.selectedProjectAmmoId = id;
   state.projectAmmoDraft = null;
@@ -1026,6 +1312,78 @@ function openAiFrontierCard(id) {
 function openRhythmLog(id) {
   state.activeModule = "rhythm";
   selectRhythmLog(id);
+}
+
+function openGlobalSearchResult(key) {
+  const [type, ...idParts] = key.split(":");
+  const id = idParts.join(":");
+
+  if (type === "opportunity") {
+    state.activeModule = "pipeline";
+    selectOpportunity(id);
+    return;
+  }
+  if (type === "interview") {
+    const interview = state.interviews.find((item) => item.id === id);
+    if (interview?.opportunityId) {
+      state.selectedId = interview.opportunityId;
+    }
+    state.activeModule = "pipeline";
+    selectInterview(id);
+    return;
+  }
+  if (type === "brief") {
+    const brief = state.briefs.find((item) => item.id === id);
+    if (brief?.interviewRoundId) openPreInterviewForInterview(brief.interviewRoundId);
+    return;
+  }
+  if (type === "review") {
+    const review = state.reviews.find((item) => item.id === id);
+    if (review?.interviewRoundId) openReviewForInterview(review.interviewRoundId);
+    return;
+  }
+  if (type === "weakness") {
+    openWeakness(id);
+    return;
+  }
+  if (type === "trainingTask") {
+    openTrainingTask(id);
+    return;
+  }
+  if (type === "projectAmmo") {
+    openProjectAmmo(id);
+    return;
+  }
+  if (type === "followUpQuestion") {
+    openFollowUpQuestion(id);
+    return;
+  }
+  if (type === "expressionDrill") {
+    state.activeModule = "expressionLab";
+    openExpressionDrill(id);
+    return;
+  }
+  if (type === "expressionSession") {
+    openExpressionSession(id);
+    return;
+  }
+  if (type === "portfolioProject") {
+    state.activeModule = "portfolio";
+    state.portfolioPreviewMode = false;
+    selectPortfolioProject(id);
+    return;
+  }
+  if (type === "aiAnalysis") {
+    openAiAnalysisNote(id);
+    return;
+  }
+  if (type === "aiFrontier") {
+    openAiFrontierCard(id);
+    return;
+  }
+  if (type === "rhythm") {
+    openRhythmLog(id);
+  }
 }
 
 function openDispatchItem(id) {
@@ -2250,6 +2608,21 @@ function renderDetailPanel() {
 }
 
 function attachCommonEvents() {
+  document.querySelector("#global-search-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    state.globalSearchQuery = String(formData.get("query") || "").trim();
+    state.globalSearchFilter = String(formData.get("filter") || "all");
+    render();
+  });
+  document.querySelector("#clear-global-search-btn")?.addEventListener("click", () => {
+    state.globalSearchQuery = "";
+    state.globalSearchFilter = "all";
+    render();
+  });
+  document.querySelectorAll("[data-global-search-result]").forEach((button) => {
+    button.addEventListener("click", () => openGlobalSearchResult(button.dataset.globalSearchResult));
+  });
   document.querySelector("#new-opp-btn")?.addEventListener("click", beginNewOpportunity);
   document.querySelector("#refresh-btn")?.addEventListener("click", loadOpportunities);
   document.querySelectorAll("[data-select-id]").forEach((button) => {
@@ -3457,6 +3830,90 @@ function renderDispatchOverview(queue) {
         ${renderDispatchQueue(queue)}
       </div>
     </section>
+  `;
+}
+
+function renderGlobalSearch() {
+  const results = createGlobalSearchResults();
+  const data = globalSearchMetrics();
+  const query = state.globalSearchQuery.trim();
+
+  return `
+    ${renderTopbar("全局检索", "跨模块查找岗位、面试、复盘、训练、项目、作品集和节奏记录，并直接跳回原工作区。", "11 Global Search")}
+    <section class="grid metrics compact-metrics">
+      <div class="metric"><div class="metric-label">可检索记录</div><div class="metric-value">${data.totalRecords}</div></div>
+      <div class="metric"><div class="metric-label">当前结果</div><div class="metric-value">${data.visibleResults}</div></div>
+      <div class="metric"><div class="metric-label">筛选范围</div><div class="metric-value small">${escapeHtml(data.activeFilter)}</div></div>
+      <div class="metric"><div class="metric-label">当前关键词</div><div class="metric-value small">${query ? escapeHtml(query) : "最近更新"}</div></div>
+    </section>
+    <div class="search-layout">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">检索条件</h2>
+            <p class="panel-subtitle">支持多个关键词，用空格分隔；不输入关键词时显示最近更新的记录。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <form id="global-search-form" class="search-form">
+            <div class="form-field">
+              <label>关键词</label>
+              <input name="query" value="${escapeHtml(state.globalSearchQuery)}" placeholder="公司、项目、卡点、下一步动作..." autofocus />
+            </div>
+            <div class="form-field">
+              <label>范围</label>
+              ${renderSelect("filter", GLOBAL_SEARCH_FILTERS, state.globalSearchFilter)}
+            </div>
+            <div class="actions">
+              <button class="btn primary" type="submit">检索</button>
+              <button class="btn" id="clear-global-search-btn" type="button">清空</button>
+            </div>
+          </form>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">结果</h2>
+            <p class="panel-subtitle">${query ? "按关键词匹配标题、状态、正文和下一步动作。" : "展示最近更新的跨模块记录。"}</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          ${renderGlobalSearchResults(results)}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderGlobalSearchResults(results) {
+  if (!results.length) {
+    return `<div class="empty">没有匹配结果。可以减少关键词，或切换到“全部内容”。</div>`;
+  }
+
+  return `
+    <div class="work-list search-results">
+      ${results
+        .map(
+          (item) => `
+            <button class="work-item search-result" data-global-search-result="${escapeHtml(item.key)}" type="button">
+              <div class="search-result-main">
+                <p class="work-item-title">${escapeHtml(item.title)}</p>
+                <p class="work-item-meta">${escapeHtml(item.meta)}${item.updatedAt ? ` · ${escapeHtml(formatDateTime(item.updatedAt))}` : ""}</p>
+                ${item.content ? `<p class="search-result-content">${escapeHtml(item.content).slice(0, 180)}</p>` : ""}
+              </div>
+              <div class="search-result-tags">
+                <span class="tag search-kind">${optionLabel(GLOBAL_SEARCH_FILTERS, item.type)}</span>
+                ${item.badges
+                  .slice(0, 3)
+                  .map((badge) => `<span class="tag muted">${escapeHtml(badge)}</span>`)
+                  .join("")}
+              </div>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
   `;
 }
 
@@ -5621,6 +6078,7 @@ function renderExpressionSessionForm(drill) {
 function render() {
   let content;
   if (state.activeModule === "dashboard") content = renderDashboard();
+  if (state.activeModule === "globalSearch") content = renderGlobalSearch();
   if (state.activeModule === "pipeline") content = renderPipeline();
   if (state.activeModule === "preInterview") content = renderPreInterview();
   if (state.activeModule === "postInterview") content = renderPostInterview();
