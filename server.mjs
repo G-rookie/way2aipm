@@ -17,6 +17,7 @@ const TRAINING_TASKS_DIR = path.join(CONTENT_DIR, "training-tasks");
 const PROJECT_AMMOS_DIR = path.join(CONTENT_DIR, "project-ammos");
 const FOLLOW_UP_QUESTIONS_DIR = path.join(CONTENT_DIR, "follow-up-questions");
 const EXPRESSION_DRILLS_DIR = path.join(CONTENT_DIR, "expression-drills");
+const EXPRESSION_SESSIONS_DIR = path.join(CONTENT_DIR, "expression-sessions");
 const PORTFOLIO_DIR = path.join(CONTENT_DIR, "portfolio");
 const PORTFOLIO_PROJECTS_DIR = path.join(CONTENT_DIR, "portfolio-projects");
 const AI_ANALYSIS_NOTES_DIR = path.join(CONTENT_DIR, "ai-analysis-notes");
@@ -97,6 +98,14 @@ const EXPRESSION_DRILL_SOURCE_TYPES = new Set([
 ]);
 const EXPRESSION_DRILL_SCORES = new Set(["unstable", "usable", "stable"]);
 const EXPRESSION_DRILL_STATUSES = new Set(["todo", "practicing", "reviewing", "stable", "archived"]);
+const EXPRESSION_SESSION_ATTEMPT_TYPES = new Set([
+  "read_aloud",
+  "mock_interview",
+  "structured_rewrite",
+  "fast_recall",
+  "review",
+]);
+const EXPRESSION_SESSION_STATUSES = new Set(["draft", "practiced", "needs_rework", "stable", "archived"]);
 const PORTFOLIO_STATUSES = new Set(["draft", "reviewing", "ready", "published_ready"]);
 const PORTFOLIO_VISIBILITIES = new Set(["private", "portfolio", "hidden"]);
 const PORTFOLIO_READINESS = new Set(["draft", "needs_sanitizing", "needs_evidence", "ready"]);
@@ -176,6 +185,7 @@ async function ensureContentDirs() {
   await mkdir(PROJECT_AMMOS_DIR, { recursive: true });
   await mkdir(FOLLOW_UP_QUESTIONS_DIR, { recursive: true });
   await mkdir(EXPRESSION_DRILLS_DIR, { recursive: true });
+  await mkdir(EXPRESSION_SESSIONS_DIR, { recursive: true });
   await mkdir(PORTFOLIO_DIR, { recursive: true });
   await mkdir(PORTFOLIO_PROJECTS_DIR, { recursive: true });
   await mkdir(AI_ANALYSIS_NOTES_DIR, { recursive: true });
@@ -253,6 +263,13 @@ function createExpressionDrillId(question) {
   const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
   const random = Math.random().toString(36).slice(2, 7);
   return `drill_${stamp}_${seed}_${random}`;
+}
+
+function createExpressionSessionId(question) {
+  const seed = slugify(question);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `exprsess_${stamp}_${seed}_${random}`;
 }
 
 function createPortfolioProjectId(title) {
@@ -344,6 +361,12 @@ function expressionDrillPath(id) {
   const safeId = sanitizeId(id, "drill");
   if (!safeId) return null;
   return path.join(EXPRESSION_DRILLS_DIR, `${safeId}.md`);
+}
+
+function expressionSessionPath(id) {
+  const safeId = sanitizeId(id, "exprsess");
+  if (!safeId) return null;
+  return path.join(EXPRESSION_SESSIONS_DIR, `${safeId}.md`);
 }
 
 function portfolioProfilePath() {
@@ -780,6 +803,45 @@ function normalizeExpressionDrill(input, existing = {}) {
   };
 }
 
+function normalizeExpressionSession(input, existing = {}, drill) {
+  const now = new Date().toISOString();
+  const drillId = String(input.drillId ?? existing.drillId ?? drill?.id ?? "").trim();
+  const question = String(input.question ?? existing.question ?? drill?.question ?? "").trim();
+  const attemptType = EXPRESSION_SESSION_ATTEMPT_TYPES.has(input.attemptType)
+    ? input.attemptType
+    : existing.attemptType || "read_aloud";
+  const selfRating = EXPRESSION_DRILL_SCORES.has(input.selfRating)
+    ? input.selfRating
+    : existing.selfRating || "unstable";
+  const status = EXPRESSION_SESSION_STATUSES.has(input.status) ? input.status : existing.status || "draft";
+
+  if (!drillId) {
+    throw new Error("drillId is required");
+  }
+  if (!question) {
+    throw new Error("question is required");
+  }
+
+  return {
+    id: existing.id || input.id || createExpressionSessionId(question),
+    type: "expressionSession",
+    drillId,
+    question,
+    practicedAt: String(input.practicedAt ?? existing.practicedAt ?? "").trim(),
+    attemptType,
+    durationMinutes: String(input.durationMinutes ?? existing.durationMinutes ?? "").trim(),
+    selfRating,
+    blockers: String(input.blockers ?? existing.blockers ?? ""),
+    improvedAnswer: String(input.improvedAnswer ?? existing.improvedAnswer ?? ""),
+    reviewerNote: String(input.reviewerNote ?? existing.reviewerNote ?? ""),
+    stabilityEvidence: String(input.stabilityEvidence ?? existing.stabilityEvidence ?? ""),
+    nextAction: String(input.nextAction ?? existing.nextAction ?? "").trim(),
+    status,
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 function normalizePortfolioProfile(input = {}, existing = {}, options = {}) {
   const now = new Date().toISOString();
   const portfolioStatus = PORTFOLIO_STATUSES.has(input.portfolioStatus)
@@ -1041,6 +1103,13 @@ function expressionDrillToMarkdown(drill) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 问题\n\n${drill.question}\n\n## 目标回答\n\n${drill.targetAnswer}\n\n## 练习记录\n\n${drill.practiceRecord}\n\n## 下一步动作\n\n${drill.nextAction}\n`;
 }
 
+function expressionSessionToMarkdown(session) {
+  const frontMatter = JSON.stringify(session, null, 2);
+  const title = markdownEscapeTitle(session.question || "表达练习");
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 卡点\n\n${session.blockers}\n\n## 改进回答\n\n${session.improvedAnswer}\n\n## 复核记录\n\n${session.reviewerNote}\n\n## 稳定性证据\n\n${session.stabilityEvidence}\n\n## 下一步动作\n\n${session.nextAction}\n`;
+}
+
 function portfolioProfileToMarkdown(profile) {
   const frontMatter = JSON.stringify(profile, null, 2);
 
@@ -1133,6 +1202,12 @@ async function readFollowUpQuestionFile(filePath) {
 }
 
 async function readExpressionDrillFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readExpressionSessionFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -1527,6 +1602,48 @@ async function listExpressionDrills(filters = {}) {
   return filtered;
 }
 
+async function listExpressionSessions(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(EXPRESSION_SESSIONS_DIR, { withFileTypes: true });
+  const sessions = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readExpressionSessionFile(path.join(EXPRESSION_SESSIONS_DIR, entry.name));
+      if (item.type === "expressionSession") {
+        sessions.push(item);
+      }
+    } catch (error) {
+      sessions.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "expressionSession",
+        drillId: "",
+        question: "读取失败",
+        selfRating: "unstable",
+        status: "draft",
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = sessions.filter((session) => {
+    if (filters.drillId && session.drillId !== filters.drillId) return false;
+    if (filters.status && session.status !== filters.status) return false;
+    if (filters.selfRating && session.selfRating !== filters.selfRating) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const statusOrder = { needs_rework: 0, practiced: 1, draft: 2, stable: 3, archived: 4 };
+    const statusDiff = (statusOrder[a.status] ?? 5) - (statusOrder[b.status] ?? 5);
+    if (statusDiff) return statusDiff;
+    return String(b.practicedAt || b.updatedAt || "").localeCompare(String(a.practicedAt || a.updatedAt || ""));
+  });
+  return filtered;
+}
+
 async function getPortfolioProfile() {
   await ensureContentDirs();
   try {
@@ -1821,6 +1938,18 @@ async function getExpressionDrill(id) {
   }
 }
 
+async function getExpressionSession(id) {
+  const filePath = expressionSessionPath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readExpressionSessionFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function getPortfolioProject(id) {
   const filePath = portfolioProjectPath(id);
   if (!filePath) return null;
@@ -1957,6 +2086,16 @@ async function saveExpressionDrill(drill) {
   }
   await writeFile(filePath, expressionDrillToMarkdown(drill), "utf8");
   return drill;
+}
+
+async function saveExpressionSession(session) {
+  await ensureContentDirs();
+  const filePath = expressionSessionPath(session.id);
+  if (!filePath) {
+    throw new Error("Invalid expression session id");
+  }
+  await writeFile(filePath, expressionSessionToMarkdown(session), "utf8");
+  return session;
 }
 
 async function savePortfolioProfile(profile) {
@@ -2754,6 +2893,55 @@ async function handleApi(req, res, url) {
       await saveExpressionDrill(expressionDrill);
       const followUpQuestion = await syncExpressionDrillSource(expressionDrill);
       return sendJson(res, 200, { expressionDrill, followUpQuestion });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/expression-sessions") {
+    if (req.method === "GET") {
+      const drillId = url.searchParams.get("drillId") || "";
+      const status = url.searchParams.get("status") || "";
+      const selfRating = url.searchParams.get("selfRating") || "";
+      const expressionSessions = await listExpressionSessions({ drillId, status, selfRating });
+      return sendJson(res, 200, { expressionSessions });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const drill = await getExpressionDrill(body.drillId);
+      if (!drill) {
+        return sendJson(res, 400, { error: "Related expression drill not found" });
+      }
+      const expressionSession = normalizeExpressionSession(body, {}, drill);
+      await saveExpressionSession(expressionSession);
+      return sendJson(res, 201, { expressionSession });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const expressionSessionMatch = url.pathname.match(/^\/api\/expression-sessions\/([^/]+)$/);
+  if (expressionSessionMatch) {
+    const id = decodeURIComponent(expressionSessionMatch[1]);
+
+    if (req.method === "GET") {
+      const expressionSession = await getExpressionSession(id);
+      if (!expressionSession) return notFound(res);
+      return sendJson(res, 200, { expressionSession });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getExpressionSession(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      const drill = await getExpressionDrill(body.drillId || existing.drillId);
+      if (!drill) {
+        return sendJson(res, 400, { error: "Related expression drill not found" });
+      }
+      const expressionSession = normalizeExpressionSession({ ...body, id }, existing, drill);
+      await saveExpressionSession(expressionSession);
+      return sendJson(res, 200, { expressionSession });
     }
 
     return methodNotAllowed(res);

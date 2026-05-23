@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.9";
+const APP_VERSION = "v0.10";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -178,6 +178,22 @@ const EXPRESSION_DRILL_STATUSES = [
   ["archived", "已归档"],
 ];
 
+const EXPRESSION_SESSION_ATTEMPT_TYPES = [
+  ["read_aloud", "朗读复述"],
+  ["mock_interview", "模拟面试"],
+  ["structured_rewrite", "结构重写"],
+  ["fast_recall", "快速回忆"],
+  ["review", "复核"],
+];
+
+const EXPRESSION_SESSION_STATUSES = [
+  ["draft", "草稿"],
+  ["practiced", "已练习"],
+  ["needs_rework", "需要返工"],
+  ["stable", "已稳定"],
+  ["archived", "已归档"],
+];
+
 const PORTFOLIO_STATUSES = [
   ["draft", "草稿"],
   ["reviewing", "整理中"],
@@ -272,6 +288,7 @@ const MODULES = [
   ["aiAnalysis", "AI 辅助分析", "07"],
   ["aiFrontier", "AI 前沿框架", "08"],
   ["rhythm", "节奏运营官", "09"],
+  ["expressionLab", "表达训练室", "10"],
 ];
 
 const EMPTY_OPPORTUNITY = {
@@ -410,6 +427,21 @@ const EMPTY_EXPRESSION_DRILL = {
   linkedTrainingTaskId: "",
 };
 
+const EMPTY_EXPRESSION_SESSION = {
+  drillId: "",
+  question: "",
+  practicedAt: "",
+  attemptType: "read_aloud",
+  durationMinutes: "",
+  selfRating: "unstable",
+  blockers: "",
+  improvedAnswer: "",
+  reviewerNote: "",
+  stabilityEvidence: "",
+  nextAction: "",
+  status: "draft",
+};
+
 const EMPTY_PORTFOLIO_PROFILE = {
   displayName: "",
   headline: "",
@@ -503,6 +535,7 @@ const state = {
   projectAmmos: [],
   followUpQuestions: [],
   expressionDrills: [],
+  expressionSessions: [],
   portfolioProfile: { ...EMPTY_PORTFOLIO_PROFILE },
   portfolioProjects: [],
   portfolioPreviewMode: false,
@@ -518,6 +551,7 @@ const state = {
   selectedProjectAmmoId: null,
   selectedFollowUpQuestionId: null,
   selectedExpressionDrillId: null,
+  selectedExpressionSessionId: null,
   selectedPortfolioProjectId: null,
   selectedAiAnalysisNoteId: null,
   selectedAiFrontierCardId: null,
@@ -531,6 +565,7 @@ const state = {
   projectAmmoDraft: null,
   followUpQuestionDraft: null,
   expressionDrillDraft: null,
+  expressionSessionDraft: null,
   portfolioProjectDraft: null,
   aiAnalysisNoteDraft: null,
   aiFrontierCardDraft: null,
@@ -545,6 +580,7 @@ const state = {
   savingProjectAmmo: false,
   savingFollowUpQuestion: false,
   savingExpressionDrill: false,
+  savingExpressionSession: false,
   savingPortfolioProfile: false,
   savingPortfolioProject: false,
   savingAiAnalysisNote: false,
@@ -616,6 +652,7 @@ async function loadData() {
       projectAmmosPayload,
       followUpQuestionsPayload,
       expressionDrillsPayload,
+      expressionSessionsPayload,
       portfolioProfilePayload,
       portfolioProjectsPayload,
       aiAnalysisNotesPayload,
@@ -631,6 +668,7 @@ async function loadData() {
       api("/api/project-ammos"),
       api("/api/follow-up-questions"),
       api("/api/expression-drills"),
+      api("/api/expression-sessions"),
       api("/api/portfolio-profile"),
       api("/api/portfolio-projects"),
       api("/api/ai-analysis-notes"),
@@ -646,6 +684,7 @@ async function loadData() {
     state.projectAmmos = projectAmmosPayload.projectAmmos || [];
     state.followUpQuestions = followUpQuestionsPayload.followUpQuestions || [];
     state.expressionDrills = expressionDrillsPayload.expressionDrills || [];
+    state.expressionSessions = expressionSessionsPayload.expressionSessions || [];
     state.portfolioProfile = portfolioProfilePayload.profile || { ...EMPTY_PORTFOLIO_PROFILE };
     state.portfolioProjects = portfolioProjectsPayload.portfolioProjects || [];
     state.aiAnalysisNotes = aiAnalysisNotesPayload.aiAnalysisNotes || [];
@@ -695,6 +734,9 @@ async function loadData() {
     }
     if (!state.selectedRhythmLogId && state.rhythmLogs.length) {
       state.selectedRhythmLogId = state.rhythmLogs[0].id;
+    }
+    if (!state.selectedExpressionSessionId && state.expressionSessions.length) {
+      state.selectedExpressionSessionId = state.expressionSessions[0].id;
     }
   } catch (error) {
     showToast(error.message);
@@ -854,6 +896,15 @@ function selectedExpressionDrill() {
   return state.expressionDrills.find((item) => item.id === state.selectedExpressionDrillId) || null;
 }
 
+function sessionsForDrill(drillId) {
+  return state.expressionSessions.filter((item) => item.drillId === drillId);
+}
+
+function selectedExpressionSession() {
+  if (state.expressionSessionDraft) return state.expressionSessionDraft;
+  return state.expressionSessions.find((item) => item.id === state.selectedExpressionSessionId) || null;
+}
+
 function selectedPortfolioProject() {
   if (state.portfolioProjectDraft) return state.portfolioProjectDraft;
   return state.portfolioProjects.find((item) => item.id === state.selectedPortfolioProjectId) || null;
@@ -914,6 +965,15 @@ function rhythmMetrics() {
     recoveryNeeded: state.rhythmLogs.filter((item) => item.status === "recovery_needed").length,
     highLoad: state.rhythmLogs.filter((item) => item.loadLevel === "high").length,
     lowEnergy: state.rhythmLogs.filter((item) => item.energyLevel === "low").length,
+  };
+}
+
+function expressionLabMetrics() {
+  return {
+    total: state.expressionDrills.length,
+    unstable: state.expressionDrills.filter((item) => item.score !== "stable" || item.status !== "stable").length,
+    sessions: state.expressionSessions.length,
+    stableSessions: state.expressionSessions.filter((item) => item.status === "stable" || item.selfRating === "stable").length,
   };
 }
 
@@ -1002,7 +1062,12 @@ function openDispatchItem(id) {
     return;
   }
   if (item.module === "expressionDrill") {
+    state.activeModule = "expressionLab";
     openExpressionDrill(item.targetId);
+    return;
+  }
+  if (item.module === "expressionSession") {
+    openExpressionSession(item.targetId);
     return;
   }
   if (item.module === "portfolio") {
@@ -1100,6 +1165,19 @@ function selectFollowUpQuestion(id) {
 function selectExpressionDrill(id) {
   state.selectedExpressionDrillId = id;
   state.expressionDrillDraft = null;
+  state.expressionSessionDraft = null;
+  state.selectedExpressionSessionId = sessionsForDrill(id)[0]?.id || null;
+  render();
+}
+
+function selectExpressionSession(id) {
+  const session = state.expressionSessions.find((item) => item.id === id);
+  state.selectedExpressionSessionId = id;
+  state.expressionSessionDraft = null;
+  if (session?.drillId) {
+    state.selectedExpressionDrillId = session.drillId;
+    state.expressionDrillDraft = null;
+  }
   render();
 }
 
@@ -1176,6 +1254,25 @@ function beginExpressionDrillForSelectedTrainingTask() {
     linkedTrainingTaskId: task.id,
   };
   state.selectedExpressionDrillId = null;
+  render();
+}
+
+function beginExpressionSessionForSelectedDrill() {
+  const drill = selectedExpressionDrill();
+  if (!drill?.id || state.expressionDrillDraft) {
+    showToast("请先选择或保存一条表达训练");
+    return;
+  }
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  state.expressionSessionDraft = {
+    ...EMPTY_EXPRESSION_SESSION,
+    drillId: drill.id,
+    question: drill.question,
+    improvedAnswer: drill.targetAnswer,
+    practicedAt: now.toISOString().slice(0, 16),
+  };
+  state.selectedExpressionSessionId = null;
   render();
 }
 
@@ -1314,6 +1411,14 @@ function openProjectAmmo(ammoId) {
 function openExpressionDrill(drillId) {
   const drill = state.expressionDrills.find((item) => item.id === drillId);
   if (!drill) return;
+  if (state.activeModule === "expressionLab") {
+    state.selectedExpressionDrillId = drill.id;
+    state.selectedExpressionSessionId = sessionsForDrill(drill.id)[0]?.id || null;
+    state.expressionDrillDraft = null;
+    state.expressionSessionDraft = null;
+    render();
+    return;
+  }
   if (drill.sourceType === "follow_up_question") {
     const question = state.followUpQuestions.find((item) => item.id === drill.sourceId);
     if (question) {
@@ -1344,6 +1449,17 @@ function openExpressionDrill(drillId) {
   state.projectAmmoDraft = null;
   state.followUpQuestionDraft = null;
   state.expressionDrillDraft = null;
+  render();
+}
+
+function openExpressionSession(sessionId) {
+  const session = state.expressionSessions.find((item) => item.id === sessionId);
+  if (!session) return;
+  state.activeModule = "expressionLab";
+  state.selectedExpressionDrillId = session.drillId;
+  state.selectedExpressionSessionId = session.id;
+  state.expressionDrillDraft = null;
+  state.expressionSessionDraft = null;
   render();
 }
 
@@ -1677,6 +1793,24 @@ function createDispatchQueue() {
           priority: item.score === "unstable" ? "high" : "medium",
           reason: `表达评分：${optionLabel(EXPRESSION_DRILL_SCORES, item.score)}`,
           actionLabel: "继续训练",
+        }),
+      );
+    });
+
+  state.expressionSessions
+    .filter((item) => item.status === "needs_rework" || (item.nextAction && item.status !== "stable"))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `expression-session-${item.id}`,
+          type: "expression-session",
+          title: item.question,
+          meta: `${optionLabel(EXPRESSION_SESSION_ATTEMPT_TYPES, item.attemptType)} · ${optionLabel(EXPRESSION_DRILL_SCORES, item.selfRating)}`,
+          module: "expressionSession",
+          targetId: item.id,
+          priority: item.status === "needs_rework" ? "high" : "medium",
+          reason: item.nextAction || "练习记录需要返工",
+          actionLabel: "复盘练习",
         }),
       );
     });
@@ -2252,6 +2386,10 @@ function attachCommonEvents() {
   document.querySelectorAll("[data-expression-drill-id]").forEach((button) => {
     button.addEventListener("click", () => selectExpressionDrill(button.dataset.expressionDrillId));
   });
+  document.querySelector("#new-expression-session-btn")?.addEventListener("click", beginExpressionSessionForSelectedDrill);
+  document.querySelectorAll("[data-expression-session-id]").forEach((button) => {
+    button.addEventListener("click", () => selectExpressionSession(button.dataset.expressionSessionId));
+  });
   document.querySelector("#cancel-interview-btn")?.addEventListener("click", () => {
     state.interviewDraft = null;
     state.selectedInterviewId = interviewsForOpportunity(state.selectedId)[0]?.id || null;
@@ -2316,6 +2454,13 @@ function attachCommonEvents() {
       : null;
     render();
   });
+  document.querySelector("#cancel-expression-session-btn")?.addEventListener("click", () => {
+    state.expressionSessionDraft = null;
+    state.selectedExpressionSessionId = state.selectedExpressionDrillId
+      ? sessionsForDrill(state.selectedExpressionDrillId)[0]?.id || null
+      : null;
+    render();
+  });
   document.querySelector("#cancel-portfolio-project-btn")?.addEventListener("click", () => {
     state.portfolioProjectDraft = null;
     state.selectedPortfolioProjectId = state.portfolioProjects[0]?.id || null;
@@ -2345,6 +2490,7 @@ function attachCommonEvents() {
   document.querySelector("#project-ammo-form")?.addEventListener("submit", submitProjectAmmo);
   document.querySelector("#follow-up-question-form")?.addEventListener("submit", submitFollowUpQuestion);
   document.querySelector("#expression-drill-form")?.addEventListener("submit", submitExpressionDrill);
+  document.querySelector("#expression-session-form")?.addEventListener("submit", submitExpressionSession);
   document.querySelector("#portfolio-profile-form")?.addEventListener("submit", submitPortfolioProfile);
   document.querySelector("#portfolio-project-form")?.addEventListener("submit", submitPortfolioProject);
   document.querySelector("#ai-analysis-form")?.addEventListener("submit", submitAiAnalysisNote);
@@ -2897,6 +3043,63 @@ async function submitExpressionDrill(event) {
     showToast(error.message);
   } finally {
     state.savingExpressionDrill = false;
+    render();
+  }
+}
+
+function formToExpressionSession(form) {
+  const formData = new FormData(form);
+  return {
+    drillId: formData.get("drillId"),
+    question: formData.get("question"),
+    practicedAt: formData.get("practicedAt"),
+    attemptType: formData.get("attemptType"),
+    durationMinutes: formData.get("durationMinutes"),
+    selfRating: formData.get("selfRating"),
+    blockers: formData.get("blockers"),
+    improvedAnswer: formData.get("improvedAnswer"),
+    reviewerNote: formData.get("reviewerNote"),
+    stabilityEvidence: formData.get("stabilityEvidence"),
+    nextAction: formData.get("nextAction"),
+    status: formData.get("status"),
+  };
+}
+
+async function submitExpressionSession(event) {
+  event.preventDefault();
+  if (state.savingExpressionSession) return;
+
+  const payload = formToExpressionSession(event.currentTarget);
+  if (state.expressionSessionDraft) {
+    state.expressionSessionDraft = { ...state.expressionSessionDraft, ...payload };
+  } else {
+    state.expressionSessions = state.expressionSessions.map((item) =>
+      item.id === state.selectedExpressionSessionId ? { ...item, ...payload } : item,
+    );
+  }
+  state.savingExpressionSession = true;
+  render();
+
+  try {
+    const isNew = Boolean(state.expressionSessionDraft);
+    const path = isNew
+      ? "/api/expression-sessions"
+      : `/api/expression-sessions/${encodeURIComponent(state.selectedExpressionSessionId)}`;
+    const method = isNew ? "POST" : "PUT";
+    const result = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    state.selectedExpressionSessionId = result.expressionSession.id;
+    state.selectedExpressionDrillId = result.expressionSession.drillId;
+    state.expressionSessionDraft = null;
+    showToast("练习记录已保存");
+    const list = await api("/api/expression-sessions");
+    state.expressionSessions = list.expressionSessions || [];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingExpressionSession = false;
     render();
   }
 }
@@ -5251,6 +5454,170 @@ function renderRhythmDetail(log) {
   `;
 }
 
+function renderExpressionLab() {
+  const data = expressionLabMetrics();
+  const drill = selectedExpressionDrill();
+
+  return `
+    ${renderTopbar("表达稳定性训练室", "把分散的表达训练统一收束，记录每一次练习，直到可以稳定说出口。", "10 Expression Lab")}
+    <section class="grid metrics compact-metrics">
+      <div class="metric"><div class="metric-label">训练总数</div><div class="metric-value">${data.total}</div></div>
+      <div class="metric"><div class="metric-label">未稳定</div><div class="metric-value">${data.unstable}</div></div>
+      <div class="metric"><div class="metric-label">练习记录</div><div class="metric-value">${data.sessions}</div></div>
+      <div class="metric"><div class="metric-label">稳定记录</div><div class="metric-value">${data.stableSessions}</div></div>
+    </section>
+    <div class="workspace">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">全局表达训练</h2>
+            <p class="panel-subtitle">来自项目追问、能力缺陷、训练任务和面试复盘的表达训练都会汇总到这里。</p>
+          </div>
+        </div>
+        <div class="panel-body">${renderExpressionLabDrillList()}</div>
+      </section>
+      ${renderExpressionLabDetail(drill)}
+    </div>
+  `;
+}
+
+function renderExpressionLabDrillList() {
+  if (!state.expressionDrills.length) {
+    return `<div class="empty">还没有表达训练。可以先从项目追问、能力缺陷或训练任务里创建训练记录。</div>`;
+  }
+
+  return `
+    <div class="work-list">
+      ${state.expressionDrills
+        .map(
+          (drill) => `
+            <button class="work-item ${drill.id === state.selectedExpressionDrillId ? "active" : ""}" data-expression-drill-id="${escapeHtml(drill.id)}" type="button">
+              <div>
+                <p class="work-item-title">${escapeHtml(drill.question)}</p>
+                <p class="work-item-meta">${optionLabel(EXPRESSION_DRILL_SOURCE_TYPES, drill.sourceType)} · 练习 ${sessionsForDrill(drill.id).length} 次</p>
+              </div>
+              <span class="tag drill-${drill.status}">${optionLabel(EXPRESSION_DRILL_STATUSES, drill.status)}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderExpressionLabDetail(drill) {
+  if (!drill) {
+    return `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">训练详情</h2>
+            <p class="panel-subtitle">选择一条表达训练，查看目标回答和练习记录。</p>
+          </div>
+        </div>
+        <div class="panel-body"><div class="empty">当前没有选中的表达训练。</div></div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">训练详情</h2>
+          <p class="panel-subtitle">保存表达训练本体后，可以持续追加练习 session。</p>
+        </div>
+      </div>
+      <div class="panel-body stack">
+        ${renderExpressionDrillFormForSource(drill.sourceType, drill.sourceId)}
+        <div class="detail-divider"></div>
+        <div class="section-heading">
+          <div>
+            <h3>练习记录</h3>
+            <p>每一次练习都记录卡点、改进回答和稳定性证据。</p>
+          </div>
+          <button class="btn" id="new-expression-session-btn" type="button">新增练习</button>
+        </div>
+        ${renderExpressionSessionList(drill.id)}
+        ${renderExpressionSessionForm(drill)}
+      </div>
+    </section>
+  `;
+}
+
+function renderExpressionSessionList(drillId) {
+  const sessions = sessionsForDrill(drillId);
+  if (!sessions.length) {
+    return `<div class="empty">还没有练习记录。先新增一次练习，把“目标回答”练到能稳定说出口。</div>`;
+  }
+
+  return `
+    <div class="work-list">
+      ${sessions
+        .map(
+          (session) => `
+            <button class="work-item ${session.id === state.selectedExpressionSessionId ? "active" : ""}" data-expression-session-id="${escapeHtml(session.id)}" type="button">
+              <div>
+                <p class="work-item-title">${optionLabel(EXPRESSION_SESSION_ATTEMPT_TYPES, session.attemptType)}${session.practicedAt ? ` · ${escapeHtml(formatDateTime(session.practicedAt))}` : ""}</p>
+                <p class="work-item-meta">${optionLabel(EXPRESSION_DRILL_SCORES, session.selfRating)}${session.nextAction ? ` · ${escapeHtml(session.nextAction)}` : ""}</p>
+              </div>
+              <span class="tag session-${session.status}">${optionLabel(EXPRESSION_SESSION_STATUSES, session.status)}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderExpressionSessionForm(drill) {
+  const session = selectedExpressionSession();
+  const isNew = Boolean(state.expressionSessionDraft);
+
+  if (!session || session.drillId !== drill.id) {
+    return `<div class="empty">选择一条练习记录进行编辑，或从当前训练新增练习。</div>`;
+  }
+
+  return `
+    <form id="expression-session-form" class="form-grid compact-form">
+      <input type="hidden" name="drillId" value="${escapeHtml(session.drillId)}" />
+      <input type="hidden" name="question" value="${escapeHtml(session.question)}" />
+      <div class="form-field">
+        <label>练习时间</label>
+        <input name="practicedAt" type="datetime-local" value="${escapeHtml(session.practicedAt)}" />
+      </div>
+      <div class="form-field">
+        <label>练习方式</label>
+        ${renderSelect("attemptType", EXPRESSION_SESSION_ATTEMPT_TYPES, session.attemptType)}
+      </div>
+      <div class="form-field">
+        <label>时长分钟</label>
+        <input name="durationMinutes" type="number" min="0" value="${escapeHtml(session.durationMinutes)}" />
+      </div>
+      <div class="form-field">
+        <label>自评分</label>
+        ${renderSelect("selfRating", EXPRESSION_DRILL_SCORES, session.selfRating)}
+      </div>
+      <div class="form-field">
+        <label>状态</label>
+        ${renderSelect("status", EXPRESSION_SESSION_STATUSES, session.status)}
+      </div>
+      ${renderBriefField("blockers", "卡点", session.blockers, "这次说不稳、卡住或容易跑偏的地方")}
+      ${renderBriefField("improvedAnswer", "改进回答", session.improvedAnswer, "这次练习后更稳定的回答版本")}
+      ${renderBriefField("reviewerNote", "复核记录", session.reviewerNote, "自我复核或模拟面试反馈")}
+      ${renderBriefField("stabilityEvidence", "稳定性证据", session.stabilityEvidence, "能证明更稳定的证据，例如连续复述、模拟面试通过")}
+      ${renderBriefField("nextAction", "下一步动作", session.nextAction, "下一次练习要继续处理什么")}
+      <div class="form-field full">
+        <div class="actions">
+          ${isNew ? `<button class="btn" id="cancel-expression-session-btn" type="button">取消</button>` : ""}
+          <button class="btn primary" type="submit">${state.savingExpressionSession ? "保存中..." : "保存练习记录"}</button>
+        </div>
+        <div class="status-line">${session.updatedAt ? `上次更新：${escapeHtml(session.updatedAt)}` : "保存后会写入 content/expression-sessions。"}</div>
+      </div>
+    </form>
+  `;
+}
+
 function render() {
   let content;
   if (state.activeModule === "dashboard") content = renderDashboard();
@@ -5263,6 +5630,7 @@ function render() {
   if (state.activeModule === "aiAnalysis") content = renderAiAnalysis();
   if (state.activeModule === "aiFrontier") content = renderAiFrontier();
   if (state.activeModule === "rhythm") content = renderRhythm();
+  if (state.activeModule === "expressionLab") content = renderExpressionLab();
 
   renderShell(content);
   attachCommonEvents();

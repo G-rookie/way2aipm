@@ -560,6 +560,31 @@ h1 {
   color: var(--muted);
 }
 
+.tag.session-draft {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.tag.session-practiced {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.tag.session-needs_rework {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.tag.session-stable {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.tag.session-archived {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
 .tag.score-unstable {
   background: var(--red-bg);
   color: var(--red);
