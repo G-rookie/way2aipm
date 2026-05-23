@@ -21,6 +21,7 @@ const PORTFOLIO_DIR = path.join(CONTENT_DIR, "portfolio");
 const PORTFOLIO_PROJECTS_DIR = path.join(CONTENT_DIR, "portfolio-projects");
 const AI_ANALYSIS_NOTES_DIR = path.join(CONTENT_DIR, "ai-analysis-notes");
 const AI_FRONTIER_CARDS_DIR = path.join(CONTENT_DIR, "ai-frontier-cards");
+const RHYTHM_LOGS_DIR = path.join(CONTENT_DIR, "rhythm-logs");
 const PORTFOLIO_PROFILE_ID = "portfolio_profile";
 
 const STAGES = new Set([
@@ -131,6 +132,8 @@ const AI_FRONTIER_CATEGORIES = new Set([
   "other",
 ]);
 const AI_FRONTIER_STATUSES = new Set(["inbox", "summarized", "mapped", "applied", "archived"]);
+const RHYTHM_LEVELS = new Set(["low", "medium", "high"]);
+const RHYTHM_STATUSES = new Set(["planned", "active", "recovery_needed", "closed", "archived"]);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -177,6 +180,7 @@ async function ensureContentDirs() {
   await mkdir(PORTFOLIO_PROJECTS_DIR, { recursive: true });
   await mkdir(AI_ANALYSIS_NOTES_DIR, { recursive: true });
   await mkdir(AI_FRONTIER_CARDS_DIR, { recursive: true });
+  await mkdir(RHYTHM_LOGS_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -272,6 +276,13 @@ function createAiFrontierCardId(topic) {
   return `aifront_${stamp}_${seed}_${random}`;
 }
 
+function createRhythmLogId(title, date) {
+  const seed = slugify(`${date}-${title}`);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `rhythm_${stamp}_${seed}_${random}`;
+}
+
 function sanitizeId(id, prefix) {
   const value = String(id || "");
   const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
@@ -355,6 +366,12 @@ function aiFrontierCardPath(id) {
   const safeId = sanitizeId(id, "aifront");
   if (!safeId) return null;
   return path.join(AI_FRONTIER_CARDS_DIR, `${safeId}.md`);
+}
+
+function rhythmLogPath(id) {
+  const safeId = sanitizeId(id, "rhythm");
+  if (!safeId) return null;
+  return path.join(RHYTHM_LOGS_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -907,6 +924,49 @@ function normalizeAiFrontierCard(input, existing = {}) {
   };
 }
 
+function normalizeRhythmLog(input, existing = {}) {
+  const now = new Date().toISOString();
+  const date = String(input.date ?? existing.date ?? new Date().toISOString().slice(0, 10)).trim();
+  const title = String(input.title ?? existing.title ?? date).trim();
+  const energyLevel = RHYTHM_LEVELS.has(input.energyLevel) ? input.energyLevel : existing.energyLevel || "medium";
+  const focusLevel = RHYTHM_LEVELS.has(input.focusLevel) ? input.focusLevel : existing.focusLevel || "medium";
+  const loadLevel = RHYTHM_LEVELS.has(input.loadLevel) ? input.loadLevel : existing.loadLevel || "medium";
+  const recoveryLevel = RHYTHM_LEVELS.has(input.recoveryLevel)
+    ? input.recoveryLevel
+    : existing.recoveryLevel || "medium";
+  const rhythmRisk = RHYTHM_LEVELS.has(input.rhythmRisk) ? input.rhythmRisk : existing.rhythmRisk || "medium";
+  const status = RHYTHM_STATUSES.has(input.status) ? input.status : existing.status || "active";
+
+  if (!title) {
+    throw new Error("title is required");
+  }
+  if (!date) {
+    throw new Error("date is required");
+  }
+
+  return {
+    id: existing.id || input.id || createRhythmLogId(title, date),
+    type: "rhythmLog",
+    date,
+    title,
+    energyLevel,
+    focusLevel,
+    loadLevel,
+    recoveryLevel,
+    sleepHours: String(input.sleepHours ?? existing.sleepHours ?? "").trim(),
+    interviewLoad: String(input.interviewLoad ?? existing.interviewLoad ?? "").trim(),
+    trainingLoad: String(input.trainingLoad ?? existing.trainingLoad ?? "").trim(),
+    plannedFocus: String(input.plannedFocus ?? existing.plannedFocus ?? ""),
+    recoveryAction: String(input.recoveryAction ?? existing.recoveryAction ?? ""),
+    rhythmRisk,
+    nextAdjustment: String(input.nextAdjustment ?? existing.nextAdjustment ?? ""),
+    notes: String(input.notes ?? existing.notes ?? ""),
+    status,
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 function markdownEscapeTitle(value) {
   return String(value || "").replace(/\r?\n/g, " ").trim();
 }
@@ -1008,6 +1068,13 @@ function aiFrontierCardToMarkdown(card) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 前沿摘要\n\n${card.summary}\n\n## 关键洞察\n\n${card.keyInsights}\n\n## 产品启发\n\n${card.productImplications}\n\n## 面试迁移\n\n${card.interviewTransfer}\n\n## 作品集迁移\n\n${card.portfolioTransfer}\n\n## 开放问题\n\n${card.openQuestions}\n\n## 标签\n\n${card.tags}\n`;
 }
 
+function rhythmLogToMarkdown(log) {
+  const frontMatter = JSON.stringify(log, null, 2);
+  const title = markdownEscapeTitle(log.title);
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 当天重点\n\n${log.plannedFocus}\n\n## 恢复动作\n\n${log.recoveryAction}\n\n## 下一步调整\n\n${log.nextAdjustment}\n\n## 备注\n\n${log.notes}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -1090,6 +1157,12 @@ async function readAiAnalysisNoteFile(filePath) {
 }
 
 async function readAiFrontierCardFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readRhythmLogFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -1593,6 +1666,53 @@ async function listAiFrontierCards(filters = {}) {
   return filtered;
 }
 
+async function listRhythmLogs(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(RHYTHM_LOGS_DIR, { withFileTypes: true });
+  const logs = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readRhythmLogFile(path.join(RHYTHM_LOGS_DIR, entry.name));
+      if (item.type === "rhythmLog") {
+        logs.push(item);
+      }
+    } catch (error) {
+      logs.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "rhythmLog",
+        title: "读取失败",
+        date: "",
+        energyLevel: "medium",
+        loadLevel: "medium",
+        rhythmRisk: "medium",
+        status: "active",
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = logs.filter((log) => {
+    if (filters.status && log.status !== filters.status) return false;
+    if (filters.rhythmRisk && log.rhythmRisk !== filters.rhythmRisk) return false;
+    if (filters.date && log.date !== filters.date) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const statusOrder = { recovery_needed: 0, active: 1, planned: 2, closed: 3, archived: 4 };
+    const riskOrder = { high: 0, medium: 1, low: 2 };
+    const statusDiff = (statusOrder[a.status] ?? 5) - (statusOrder[b.status] ?? 5);
+    if (statusDiff) return statusDiff;
+    const riskDiff = (riskOrder[a.rhythmRisk] ?? 3) - (riskOrder[b.rhythmRisk] ?? 3);
+    if (riskDiff) return riskDiff;
+    return String(b.date || b.updatedAt || "").localeCompare(String(a.date || a.updatedAt || ""));
+  });
+  return filtered;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
@@ -1737,6 +1857,18 @@ async function getAiFrontierCard(id) {
   }
 }
 
+async function getRhythmLog(id) {
+  const filePath = rhythmLogPath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readRhythmLogFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function saveOpportunity(opportunity) {
   await ensureContentDirs();
   const filePath = opportunityPath(opportunity.id);
@@ -1861,6 +1993,16 @@ async function saveAiFrontierCard(card) {
   }
   await writeFile(filePath, aiFrontierCardToMarkdown(card), "utf8");
   return card;
+}
+
+async function saveRhythmLog(log) {
+  await ensureContentDirs();
+  const filePath = rhythmLogPath(log.id);
+  if (!filePath) {
+    throw new Error("Invalid rhythm log id");
+  }
+  await writeFile(filePath, rhythmLogToMarkdown(log), "utf8");
+  return log;
 }
 
 function briefStatusToPreparationStatus(status) {
@@ -2737,6 +2879,47 @@ async function handleApi(req, res, url) {
       const card = normalizeAiFrontierCard({ ...body, id }, existing);
       await saveAiFrontierCard(card);
       return sendJson(res, 200, { aiFrontierCard: card });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/rhythm-logs") {
+    if (req.method === "GET") {
+      const status = url.searchParams.get("status") || "";
+      const rhythmRisk = url.searchParams.get("rhythmRisk") || "";
+      const date = url.searchParams.get("date") || "";
+      const rhythmLogs = await listRhythmLogs({ status, rhythmRisk, date });
+      return sendJson(res, 200, { rhythmLogs });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const rhythmLog = normalizeRhythmLog(body);
+      await saveRhythmLog(rhythmLog);
+      return sendJson(res, 201, { rhythmLog });
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const rhythmLogMatch = url.pathname.match(/^\/api\/rhythm-logs\/([^/]+)$/);
+  if (rhythmLogMatch) {
+    const id = decodeURIComponent(rhythmLogMatch[1]);
+
+    if (req.method === "GET") {
+      const rhythmLog = await getRhythmLog(id);
+      if (!rhythmLog) return notFound(res);
+      return sendJson(res, 200, { rhythmLog });
+    }
+
+    if (req.method === "PUT") {
+      const existing = await getRhythmLog(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      const rhythmLog = normalizeRhythmLog({ ...body, id }, existing);
+      await saveRhythmLog(rhythmLog);
+      return sendJson(res, 200, { rhythmLog });
     }
 
     return methodNotAllowed(res);

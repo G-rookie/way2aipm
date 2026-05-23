@@ -637,6 +637,31 @@ h1 {
   color: var(--muted);
 }
 
+.tag.rhythm-planned {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.tag.rhythm-active {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.tag.rhythm-recovery_needed {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.tag.rhythm-closed {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.tag.rhythm-archived {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
 .tag.dispatch-critical {
   background: var(--red-bg);
   color: var(--red);

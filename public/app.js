@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.8";
+const APP_VERSION = "v0.9";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -247,6 +247,20 @@ const AI_FRONTIER_STATUSES = [
   ["archived", "已归档"],
 ];
 
+const RHYTHM_LEVELS = [
+  ["low", "低"],
+  ["medium", "中"],
+  ["high", "高"],
+];
+
+const RHYTHM_STATUSES = [
+  ["planned", "计划中"],
+  ["active", "执行中"],
+  ["recovery_needed", "需要恢复"],
+  ["closed", "已收尾"],
+  ["archived", "已归档"],
+];
+
 const MODULES = [
   ["dashboard", "总控台", "00"],
   ["pipeline", "求职中台", "01"],
@@ -257,6 +271,7 @@ const MODULES = [
   ["portfolio", "作品集产品线", "06"],
   ["aiAnalysis", "AI 辅助分析", "07"],
   ["aiFrontier", "AI 前沿框架", "08"],
+  ["rhythm", "节奏运营官", "09"],
 ];
 
 const EMPTY_OPPORTUNITY = {
@@ -459,6 +474,24 @@ const EMPTY_AI_FRONTIER_CARD = {
   priority: "medium",
 };
 
+const EMPTY_RHYTHM_LOG = {
+  date: "",
+  title: "",
+  energyLevel: "medium",
+  focusLevel: "medium",
+  loadLevel: "medium",
+  recoveryLevel: "medium",
+  sleepHours: "",
+  interviewLoad: "",
+  trainingLoad: "",
+  plannedFocus: "",
+  recoveryAction: "",
+  rhythmRisk: "medium",
+  nextAdjustment: "",
+  notes: "",
+  status: "active",
+};
+
 const state = {
   activeModule: "dashboard",
   opportunities: [],
@@ -475,6 +508,7 @@ const state = {
   portfolioPreviewMode: false,
   aiAnalysisNotes: [],
   aiFrontierCards: [],
+  rhythmLogs: [],
   selectedId: null,
   selectedInterviewId: null,
   selectedBriefId: null,
@@ -487,6 +521,7 @@ const state = {
   selectedPortfolioProjectId: null,
   selectedAiAnalysisNoteId: null,
   selectedAiFrontierCardId: null,
+  selectedRhythmLogId: null,
   draft: null,
   interviewDraft: null,
   briefDraft: null,
@@ -499,6 +534,7 @@ const state = {
   portfolioProjectDraft: null,
   aiAnalysisNoteDraft: null,
   aiFrontierCardDraft: null,
+  rhythmLogDraft: null,
   loading: true,
   saving: false,
   savingInterview: false,
@@ -513,6 +549,7 @@ const state = {
   savingPortfolioProject: false,
   savingAiAnalysisNote: false,
   savingAiFrontierCard: false,
+  savingRhythmLog: false,
   generatingAiContext: false,
 };
 
@@ -583,6 +620,7 @@ async function loadData() {
       portfolioProjectsPayload,
       aiAnalysisNotesPayload,
       aiFrontierCardsPayload,
+      rhythmLogsPayload,
     ] = await Promise.all([
       api("/api/opportunities"),
       api("/api/interviews"),
@@ -597,6 +635,7 @@ async function loadData() {
       api("/api/portfolio-projects"),
       api("/api/ai-analysis-notes"),
       api("/api/ai-frontier-cards"),
+      api("/api/rhythm-logs"),
     ]);
     state.opportunities = opportunitiesPayload.opportunities || [];
     state.interviews = interviewsPayload.interviews || [];
@@ -611,6 +650,7 @@ async function loadData() {
     state.portfolioProjects = portfolioProjectsPayload.portfolioProjects || [];
     state.aiAnalysisNotes = aiAnalysisNotesPayload.aiAnalysisNotes || [];
     state.aiFrontierCards = aiFrontierCardsPayload.aiFrontierCards || [];
+    state.rhythmLogs = rhythmLogsPayload.rhythmLogs || [];
     if (!state.selectedId && state.opportunities.length) {
       state.selectedId = state.opportunities[0].id;
     }
@@ -652,6 +692,9 @@ async function loadData() {
     }
     if (!state.selectedAiFrontierCardId && state.aiFrontierCards.length) {
       state.selectedAiFrontierCardId = state.aiFrontierCards[0].id;
+    }
+    if (!state.selectedRhythmLogId && state.rhythmLogs.length) {
+      state.selectedRhythmLogId = state.rhythmLogs[0].id;
     }
   } catch (error) {
     showToast(error.message);
@@ -826,6 +869,11 @@ function selectedAiFrontierCard() {
   return state.aiFrontierCards.find((item) => item.id === state.selectedAiFrontierCardId) || null;
 }
 
+function selectedRhythmLog() {
+  if (state.rhythmLogDraft) return state.rhythmLogDraft;
+  return state.rhythmLogs.find((item) => item.id === state.selectedRhythmLogId) || null;
+}
+
 function portfolioProjectsInPreview() {
   return state.portfolioProjects
     .filter((item) => item.visibility === "portfolio")
@@ -860,6 +908,15 @@ function aiFrontierMetrics() {
   };
 }
 
+function rhythmMetrics() {
+  return {
+    total: state.rhythmLogs.length,
+    recoveryNeeded: state.rhythmLogs.filter((item) => item.status === "recovery_needed").length,
+    highLoad: state.rhythmLogs.filter((item) => item.loadLevel === "high").length,
+    lowEnergy: state.rhythmLogs.filter((item) => item.energyLevel === "low").length,
+  };
+}
+
 function selectProjectAmmo(id) {
   state.selectedProjectAmmoId = id;
   state.projectAmmoDraft = null;
@@ -890,6 +947,12 @@ function selectAiFrontierCard(id) {
   render();
 }
 
+function selectRhythmLog(id) {
+  state.selectedRhythmLogId = id;
+  state.rhythmLogDraft = null;
+  render();
+}
+
 function openAiAnalysisNote(id) {
   state.activeModule = "aiAnalysis";
   selectAiAnalysisNote(id);
@@ -898,6 +961,11 @@ function openAiAnalysisNote(id) {
 function openAiFrontierCard(id) {
   state.activeModule = "aiFrontier";
   selectAiFrontierCard(id);
+}
+
+function openRhythmLog(id) {
+  state.activeModule = "rhythm";
+  selectRhythmLog(id);
 }
 
 function openDispatchItem(id) {
@@ -949,6 +1017,10 @@ function openDispatchItem(id) {
   }
   if (item.module === "aiFrontier") {
     openAiFrontierCard(item.targetId);
+    return;
+  }
+  if (item.module === "rhythm") {
+    openRhythmLog(item.targetId);
   }
 }
 
@@ -976,6 +1048,14 @@ function beginNewAiFrontierCard() {
   state.activeModule = "aiFrontier";
   state.aiFrontierCardDraft = { ...EMPTY_AI_FRONTIER_CARD, topic: "新的 AI 前沿卡片" };
   state.selectedAiFrontierCardId = null;
+  render();
+}
+
+function beginNewRhythmLog() {
+  const today = new Date().toISOString().slice(0, 10);
+  state.activeModule = "rhythm";
+  state.rhythmLogDraft = { ...EMPTY_RHYTHM_LOG, date: today, title: `${today} 节奏记录` };
+  state.selectedRhythmLogId = null;
   render();
 }
 
@@ -1659,6 +1739,28 @@ function createDispatchQueue() {
       );
     });
 
+  state.rhythmLogs
+    .filter((item) =>
+      item.status === "recovery_needed" ||
+      (item.loadLevel === "high" && item.energyLevel === "low") ||
+      (item.nextAdjustment && !["closed", "archived"].includes(item.status)),
+    )
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `rhythm-${item.id}`,
+          type: "rhythm",
+          title: item.title,
+          meta: `${item.date} · 负荷 ${optionLabel(RHYTHM_LEVELS, item.loadLevel)} · 精力 ${optionLabel(RHYTHM_LEVELS, item.energyLevel)}`,
+          module: "rhythm",
+          targetId: item.id,
+          priority: item.status === "recovery_needed" || item.rhythmRisk === "high" ? "critical" : "high",
+          reason: item.status === "recovery_needed" ? "当前节奏需要恢复" : item.nextAdjustment || "高负荷且低精力",
+          actionLabel: "调整节奏",
+        }),
+      );
+    });
+
   const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
   return items.sort((a, b) => {
     const priorityDiff = (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9);
@@ -2090,6 +2192,10 @@ function attachCommonEvents() {
   document.querySelectorAll("[data-ai-frontier-card-id]").forEach((button) => {
     button.addEventListener("click", () => selectAiFrontierCard(button.dataset.aiFrontierCardId));
   });
+  document.querySelector("#new-rhythm-log-btn")?.addEventListener("click", beginNewRhythmLog);
+  document.querySelectorAll("[data-rhythm-log-id]").forEach((button) => {
+    button.addEventListener("click", () => selectRhythmLog(button.dataset.rhythmLogId));
+  });
   document.querySelector("#cancel-new-btn")?.addEventListener("click", () => {
     state.draft = null;
     state.selectedId = state.opportunities[0]?.id || null;
@@ -2225,6 +2331,11 @@ function attachCommonEvents() {
     state.selectedAiFrontierCardId = state.aiFrontierCards[0]?.id || null;
     render();
   });
+  document.querySelector("#cancel-rhythm-log-btn")?.addEventListener("click", () => {
+    state.rhythmLogDraft = null;
+    state.selectedRhythmLogId = state.rhythmLogs[0]?.id || null;
+    render();
+  });
   document.querySelector("#opportunity-form")?.addEventListener("submit", submitOpportunity);
   document.querySelector("#interview-form")?.addEventListener("submit", submitInterview);
   document.querySelector("#brief-form")?.addEventListener("submit", submitBrief);
@@ -2238,6 +2349,7 @@ function attachCommonEvents() {
   document.querySelector("#portfolio-project-form")?.addEventListener("submit", submitPortfolioProject);
   document.querySelector("#ai-analysis-form")?.addEventListener("submit", submitAiAnalysisNote);
   document.querySelector("#ai-frontier-card-form")?.addEventListener("submit", submitAiFrontierCard);
+  document.querySelector("#rhythm-log-form")?.addEventListener("submit", submitRhythmLog);
 }
 
 function formToOpportunity(form) {
@@ -3032,6 +3144,63 @@ async function submitAiFrontierCard(event) {
     showToast(error.message);
   } finally {
     state.savingAiFrontierCard = false;
+    render();
+  }
+}
+
+function formToRhythmLog(form) {
+  const formData = new FormData(form);
+  return {
+    date: formData.get("date"),
+    title: formData.get("title"),
+    energyLevel: formData.get("energyLevel"),
+    focusLevel: formData.get("focusLevel"),
+    loadLevel: formData.get("loadLevel"),
+    recoveryLevel: formData.get("recoveryLevel"),
+    sleepHours: formData.get("sleepHours"),
+    interviewLoad: formData.get("interviewLoad"),
+    trainingLoad: formData.get("trainingLoad"),
+    plannedFocus: formData.get("plannedFocus"),
+    recoveryAction: formData.get("recoveryAction"),
+    rhythmRisk: formData.get("rhythmRisk"),
+    nextAdjustment: formData.get("nextAdjustment"),
+    notes: formData.get("notes"),
+    status: formData.get("status"),
+  };
+}
+
+async function submitRhythmLog(event) {
+  event.preventDefault();
+  if (state.savingRhythmLog) return;
+
+  const payload = formToRhythmLog(event.currentTarget);
+  if (state.rhythmLogDraft) {
+    state.rhythmLogDraft = { ...state.rhythmLogDraft, ...payload };
+  } else {
+    state.rhythmLogs = state.rhythmLogs.map((item) =>
+      item.id === state.selectedRhythmLogId ? { ...item, ...payload } : item,
+    );
+  }
+  state.savingRhythmLog = true;
+  render();
+
+  try {
+    const isNew = Boolean(state.rhythmLogDraft);
+    const path = isNew ? "/api/rhythm-logs" : `/api/rhythm-logs/${encodeURIComponent(state.selectedRhythmLogId)}`;
+    const method = isNew ? "POST" : "PUT";
+    const result = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    state.selectedRhythmLogId = result.rhythmLog.id;
+    state.rhythmLogDraft = null;
+    showToast("节奏记录已保存");
+    const list = await api("/api/rhythm-logs");
+    state.rhythmLogs = list.rhythmLogs || [];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.savingRhythmLog = false;
     render();
   }
 }
@@ -4930,6 +5099,158 @@ function renderAiFrontierDetail(card) {
   `;
 }
 
+function renderRhythm() {
+  const data = rhythmMetrics();
+  const log = selectedRhythmLog();
+
+  return `
+    ${renderTopbar("个人节奏运营官", "记录精力、负荷、恢复和下一步调整，让求职闭环长期跑得动。", "09 Rhythm Operator")}
+    <section class="grid metrics compact-metrics">
+      <div class="metric"><div class="metric-label">记录总数</div><div class="metric-value">${data.total}</div></div>
+      <div class="metric"><div class="metric-label">需要恢复</div><div class="metric-value">${data.recoveryNeeded}</div></div>
+      <div class="metric"><div class="metric-label">高负荷</div><div class="metric-value">${data.highLoad}</div></div>
+      <div class="metric"><div class="metric-label">低精力</div><div class="metric-value">${data.lowEnergy}</div></div>
+    </section>
+    <div class="workspace">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">节奏记录</h2>
+            <p class="panel-subtitle">把面试、训练、恢复和日程压力放在同一张运营表里看。</p>
+          </div>
+          <button class="btn primary" id="new-rhythm-log-btn" type="button">新增记录</button>
+        </div>
+        <div class="panel-body">${renderRhythmList()}</div>
+      </section>
+      ${renderRhythmDetail(log)}
+    </div>
+  `;
+}
+
+function renderRhythmList() {
+  if (!state.rhythmLogs.length) {
+    return `<div class="empty">还没有节奏记录。先记录今天的精力、负荷和恢复动作。</div>`;
+  }
+
+  return `
+    <div class="work-list">
+      ${state.rhythmLogs
+        .map(
+          (log) => `
+            <button class="work-item ${log.id === state.selectedRhythmLogId ? "active" : ""}" data-rhythm-log-id="${escapeHtml(log.id)}" type="button">
+              <div>
+                <p class="work-item-title">${escapeHtml(log.title)}</p>
+                <p class="work-item-meta">${escapeHtml(log.date)} · 负荷 ${optionLabel(RHYTHM_LEVELS, log.loadLevel)} · 精力 ${optionLabel(RHYTHM_LEVELS, log.energyLevel)}</p>
+              </div>
+              <span class="tag rhythm-${log.status}">${optionLabel(RHYTHM_STATUSES, log.status)}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderRhythmDetail(log) {
+  const isNew = Boolean(state.rhythmLogDraft);
+
+  if (!log) {
+    return `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">节奏详情</h2>
+            <p class="panel-subtitle">选择一条记录，或新增第一条节奏记录。</p>
+          </div>
+        </div>
+        <div class="panel-body"><div class="empty">当前没有选中的节奏记录。</div></div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">${isNew ? "新增节奏记录" : "节奏记录详情"}</h2>
+          <p class="panel-subtitle">保存后会写入 content/rhythm-logs 下的 Markdown 文件。</p>
+        </div>
+      </div>
+      <div class="panel-body">
+        <form id="rhythm-log-form" class="form-grid compact-form rhythm-form">
+          <div class="form-field">
+            <label>日期</label>
+            <input name="date" type="date" value="${escapeHtml(log.date)}" required />
+          </div>
+          <div class="form-field">
+            <label>标题</label>
+            <input name="title" value="${escapeHtml(log.title)}" required />
+          </div>
+          <div class="form-field">
+            <label>状态</label>
+            ${renderSelect("status", RHYTHM_STATUSES, log.status)}
+          </div>
+          <div class="form-field">
+            <label>节奏风险</label>
+            ${renderSelect("rhythmRisk", RHYTHM_LEVELS, log.rhythmRisk)}
+          </div>
+          <div class="form-field">
+            <label>精力</label>
+            ${renderSelect("energyLevel", RHYTHM_LEVELS, log.energyLevel)}
+          </div>
+          <div class="form-field">
+            <label>专注</label>
+            ${renderSelect("focusLevel", RHYTHM_LEVELS, log.focusLevel)}
+          </div>
+          <div class="form-field">
+            <label>负荷</label>
+            ${renderSelect("loadLevel", RHYTHM_LEVELS, log.loadLevel)}
+          </div>
+          <div class="form-field">
+            <label>恢复</label>
+            ${renderSelect("recoveryLevel", RHYTHM_LEVELS, log.recoveryLevel)}
+          </div>
+          <div class="form-field">
+            <label>睡眠小时</label>
+            <input name="sleepHours" type="number" step="0.5" min="0" value="${escapeHtml(log.sleepHours)}" />
+          </div>
+          <div class="form-field">
+            <label>面试负荷</label>
+            <input name="interviewLoad" value="${escapeHtml(log.interviewLoad)}" placeholder="例如：2 场面试 / 1 个邀约" />
+          </div>
+          <div class="form-field">
+            <label>训练负荷</label>
+            <input name="trainingLoad" value="${escapeHtml(log.trainingLoad)}" placeholder="例如：复盘 1 份，表达训练 30 分钟" />
+          </div>
+          <div class="form-field full">
+            <label>当天重点</label>
+            <textarea name="plannedFocus">${escapeHtml(log.plannedFocus)}</textarea>
+          </div>
+          <div class="form-field full">
+            <label>恢复动作</label>
+            <textarea name="recoveryAction" placeholder="例如：暂停新增投递、早点睡、只做低强度整理。">${escapeHtml(log.recoveryAction)}</textarea>
+          </div>
+          <div class="form-field full">
+            <label>下一步调整</label>
+            <textarea name="nextAdjustment" placeholder="需要总控台提醒你调整的事项。">${escapeHtml(log.nextAdjustment)}</textarea>
+          </div>
+          <div class="form-field full">
+            <label>备注</label>
+            <textarea name="notes">${escapeHtml(log.notes)}</textarea>
+          </div>
+          <div class="form-field full">
+            <div class="actions">
+              ${isNew ? `<button class="btn" id="cancel-rhythm-log-btn" type="button">取消</button>` : ""}
+              <button class="btn primary" type="submit">${state.savingRhythmLog ? "保存中..." : "保存节奏记录"}</button>
+            </div>
+            <div class="status-line">${log.updatedAt ? `上次更新：${escapeHtml(log.updatedAt)}` : "保存后会写入 content/rhythm-logs。"}</div>
+          </div>
+        </form>
+      </div>
+    </section>
+  `;
+}
+
 function render() {
   let content;
   if (state.activeModule === "dashboard") content = renderDashboard();
@@ -4941,6 +5262,7 @@ function render() {
   if (state.activeModule === "portfolio") content = renderPortfolio();
   if (state.activeModule === "aiAnalysis") content = renderAiAnalysis();
   if (state.activeModule === "aiFrontier") content = renderAiFrontier();
+  if (state.activeModule === "rhythm") content = renderRhythm();
 
   renderShell(content);
   attachCommonEvents();
