@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.15";
+const APP_VERSION = "v0.16";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -2135,6 +2135,86 @@ function weaknessMetrics() {
     open: state.weaknesses.filter((weakness) => weakness.status === "open").length,
     training: state.weaknesses.filter((weakness) => weakness.status === "training").length,
     high: state.weaknesses.filter((weakness) => weakness.severity === "high").length,
+  };
+}
+
+function weaknessExpressionDrills(weakness) {
+  if (!weakness?.id) return [];
+  const taskIds = new Set(tasksForWeakness(weakness.id).map((task) => task.id));
+  return state.expressionDrills.filter(
+    (drill) => (drill.sourceType === "weakness" && drill.sourceId === weakness.id) ||
+      (drill.sourceType === "training_task" && taskIds.has(drill.sourceId)),
+  );
+}
+
+function weaknessProfileStats(weakness) {
+  const tasks = tasksForWeakness(weakness?.id);
+  const drills = weaknessExpressionDrills(weakness);
+  const completionItems = [
+    ["evidence", "证据", weakness?.evidence],
+    ["description", "缺陷描述", weakness?.description],
+    ["severity", "严重程度", weakness?.severity],
+    ["frequency", "出现频率", weakness?.frequency],
+    ["reviews", "关联复盘", (weakness?.relatedReviewIds || []).length],
+    ["tasks", "训练任务", tasks.length],
+    ["drills", "表达训练", drills.length],
+  ].map(([key, label, value]) => ({
+    key,
+    label,
+    done: Array.isArray(value) ? value.length > 0 : Boolean(String(value ?? "").trim()) && value !== 0,
+  }));
+  const completed = completionItems.filter((item) => item.done).length;
+
+  return {
+    completionItems,
+    completed,
+    total: completionItems.length,
+    completionRate: Math.round((completed / completionItems.length) * 100),
+    tasks,
+    drills,
+    activeTasks: tasks.filter((task) => ["todo", "doing"].includes(task.status)).length,
+    reviewingTasks: tasks.filter((task) => task.status === "reviewing").length,
+    validatedTasks: tasks.filter((task) => task.status === "validated").length,
+    stableDrills: drills.filter((drill) => drill.status === "stable" || drill.score === "stable").length,
+  };
+}
+
+function weaknessClosureAdvice(weakness) {
+  const stats = weaknessProfileStats(weakness);
+  const hasEvidence = Boolean(String(weakness?.evidence || "").trim()) || (weakness?.relatedReviewIds || []).length > 0;
+
+  if (!hasEvidence) {
+    return {
+      tone: "attention",
+      title: "先补证据来源",
+      body: "建议从面试复盘中补充真实问题、弱回答或面试官信号，避免缺陷只停留在感觉层。",
+    };
+  }
+  if (!stats.tasks.length) {
+    return {
+      tone: "attention",
+      title: "需要创建训练任务",
+      body: "这个缺陷还没有进入训练计划中心，建议拆成一个可验收的修复任务。",
+    };
+  }
+  if (stats.reviewingTasks || stats.activeTasks) {
+    return {
+      tone: "attention",
+      title: "训练还在闭环中",
+      body: "已有训练任务，但仍需完成产物、验收标准和验证记录，建议进入训练计划中心处理。",
+    };
+  }
+  if (weakness.status === "repaired" || stats.validatedTasks > 0) {
+    return {
+      tone: "done",
+      title: "具备修复证据",
+      body: "当前缺陷已有已验证训练，下一步可以在真实面试中观察是否稳定复现改善。",
+    };
+  }
+  return {
+    tone: "attention",
+    title: "等待验证信号",
+    body: "训练任务已经推进，但还缺少明确验证记录，建议补一次表达训练或下一轮面试验证。",
   };
 }
 
@@ -4978,6 +5058,79 @@ function renderReviewCommittee(review) {
   `;
 }
 
+function renderWeaknessProfile(weakness) {
+  const stats = weaknessProfileStats(weakness);
+  const advice = weaknessClosureAdvice(weakness);
+
+  return `
+    <section class="weakness-profile">
+      <div class="section-title">
+        <div>
+          <h3>缺陷画像</h3>
+          <p>把证据、训练和表达稳定性串成一条修复闭环。</p>
+        </div>
+        <span class="tag weakness-score">${stats.completionRate}% 完整</span>
+      </div>
+      <div class="weakness-profile-grid">
+        <div class="weakness-card">
+          <div class="weakness-card-head">
+            <span>档案完整度</span>
+            <strong>${stats.completed}/${stats.total}</strong>
+          </div>
+          <div class="committee-checks">
+            ${stats.completionItems
+              .map(
+                (item) => `
+                  <span class="committee-check ${item.done ? "done" : "todo"}">
+                    ${item.done ? "已记录" : "待补充"} · ${item.label}
+                  </span>
+                `,
+              )
+              .join("")}
+          </div>
+        </div>
+        <div class="weakness-card">
+          <div class="weakness-card-head">
+            <span>训练闭环</span>
+            <strong>${stats.tasks.length ? `${stats.validatedTasks}/${stats.tasks.length}` : "未开始"}</strong>
+          </div>
+          <div class="answer-stats">
+            <div><span>任务</span><strong>${stats.tasks.length}</strong></div>
+            <div><span>推进中</span><strong>${stats.activeTasks}</strong></div>
+            <div><span>待验收</span><strong>${stats.reviewingTasks}</strong></div>
+            <div><span>已验证</span><strong>${stats.validatedTasks}</strong></div>
+          </div>
+          <p class="mini-meta">当前状态：${optionLabel(WEAKNESS_STATUSES, weakness.status)}</p>
+        </div>
+        <div class="weakness-card">
+          <div class="weakness-card-head">
+            <span>表达稳定性</span>
+            <strong>${stats.stableDrills}/${stats.drills.length}</strong>
+          </div>
+          <div class="answer-stats">
+            <div><span>表达训练</span><strong>${stats.drills.length}</strong></div>
+            <div><span>已稳定</span><strong>${stats.stableDrills}</strong></div>
+            <div><span>频率</span><strong>${weakness.frequency || 1}</strong></div>
+            <div><span>证据</span><strong>${(weakness.relatedReviewIds || []).length}</strong></div>
+          </div>
+          <div class="tag-row">
+            <span class="tag severity-${weakness.severity}">${optionLabel(SEVERITIES, weakness.severity)}</span>
+            <span class="tag weakness-${weakness.status}">${optionLabel(WEAKNESS_STATUSES, weakness.status)}</span>
+            <span class="tag review-category">${optionLabel(WEAKNESS_CATEGORIES, weakness.category)}</span>
+          </div>
+        </div>
+      </div>
+      <div class="closure-advice ${advice.tone}">
+        <div>
+          <strong>${escapeHtml(advice.title)}</strong>
+          <p>${escapeHtml(advice.body)}</p>
+        </div>
+      </div>
+    </section>
+    <div class="detail-divider"></div>
+  `;
+}
+
 function renderWeakness() {
   const data = weaknessMetrics();
   const taskData = trainingTaskMetrics();
@@ -5063,6 +5216,7 @@ function renderWeaknessDetail(weakness) {
         </div>
       </div>
       <div class="panel-body">
+        ${renderWeaknessProfile(weakness)}
         <form id="weakness-form" class="form-grid">
           <div class="form-field full">
             <label>缺陷标题</label>

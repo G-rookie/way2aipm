@@ -1061,6 +1061,49 @@ textarea:focus {
   background: var(--yellow-bg);
 }
 
+.weakness-profile {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 18px;
+}
+
+.weakness-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.weakness-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 13px;
+  background: var(--surface);
+}
+
+.weakness-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.weakness-card-head span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.weakness-card-head strong {
+  font-size: 14px;
+  text-align: right;
+}
+
+.tag.weakness-score {
+  color: #155e75;
+  background: #cffafe;
+}
+
 .war-room {
   display: grid;
   gap: 12px;
@@ -1435,6 +1478,7 @@ textarea:focus {
   .pre-interview-layout,
   .training-closure-grid,
   .review-committee-grid,
+  .weakness-profile-grid,
   .war-room-grid,
   .answer-stats,
   .placeholder-grid,
