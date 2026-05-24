@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.18";
+const APP_VERSION = "v0.19";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -577,6 +577,7 @@ const state = {
   aiAnalysisNotes: [],
   aiFrontierCards: [],
   rhythmLogs: [],
+  systemSnapshot: null,
   selectedId: null,
   selectedInterviewId: null,
   selectedBriefId: null,
@@ -687,6 +688,7 @@ function formatDateTime(value) {
 }
 
 async function api(path, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
   const response = await fetch(path, {
     headers: { "content-type": "application/json" },
     ...options,
@@ -694,6 +696,9 @@ async function api(path, options = {}) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(payload.error || "请求失败");
+  }
+  if (method !== "GET") {
+    state.systemSnapshot = null;
   }
   return payload;
 }
@@ -718,6 +723,7 @@ async function loadData() {
       aiAnalysisNotesPayload,
       aiFrontierCardsPayload,
       rhythmLogsPayload,
+      systemSnapshotPayload,
     ] = await Promise.all([
       api("/api/opportunities"),
       api("/api/interviews"),
@@ -734,6 +740,7 @@ async function loadData() {
       api("/api/ai-analysis-notes"),
       api("/api/ai-frontier-cards"),
       api("/api/rhythm-logs"),
+      api("/api/system-snapshot").catch(() => null),
     ]);
     state.opportunities = opportunitiesPayload.opportunities || [];
     state.interviews = interviewsPayload.interviews || [];
@@ -750,6 +757,7 @@ async function loadData() {
     state.aiAnalysisNotes = aiAnalysisNotesPayload.aiAnalysisNotes || [];
     state.aiFrontierCards = aiFrontierCardsPayload.aiFrontierCards || [];
     state.rhythmLogs = rhythmLogsPayload.rhythmLogs || [];
+    state.systemSnapshot = systemSnapshotPayload?.snapshot || null;
     if (!state.selectedId && state.opportunities.length) {
       state.selectedId = state.opportunities[0].id;
     }
@@ -2378,6 +2386,10 @@ function createDispatchItem(seed) {
 }
 
 function createDispatchQueue() {
+  if (Array.isArray(state.systemSnapshot?.dispatchQueue)) {
+    return state.systemSnapshot.dispatchQueue;
+  }
+
   const items = [];
   const reviewedInterviewIds = new Set(state.reviews.map((review) => review.interviewRoundId));
   const existingPortfolioProjectAmmoIds = new Set(state.portfolioProjects.map((project) => project.projectAmmoId).filter(Boolean));

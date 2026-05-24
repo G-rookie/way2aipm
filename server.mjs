@@ -2144,6 +2144,494 @@ async function saveRhythmLog(log) {
   return log;
 }
 
+const storage = {
+  listOpportunities,
+  listInterviews,
+  listBriefs,
+  listReviews,
+  listWeaknesses,
+  listTrainingTasks,
+  listProjectAmmos,
+  listFollowUpQuestions,
+  listExpressionDrills,
+  listExpressionSessions,
+  getPortfolioProfile,
+  listPortfolioProjects,
+  listAiAnalysisNotes,
+  listAiFrontierCards,
+  listRhythmLogs,
+  getOpportunity,
+  getInterview,
+  getBrief,
+  getReview,
+  getWeakness,
+  getTrainingTask,
+  getProjectAmmo,
+  getFollowUpQuestion,
+  getExpressionDrill,
+  getExpressionSession,
+  getPortfolioProject,
+  getAiAnalysisNote,
+  getAiFrontierCard,
+  getRhythmLog,
+  saveOpportunity,
+  saveInterview,
+  saveBrief,
+  saveReview,
+  saveWeakness,
+  saveTrainingTask,
+  saveProjectAmmo,
+  saveFollowUpQuestion,
+  saveExpressionDrill,
+  saveExpressionSession,
+  savePortfolioProfile,
+  savePortfolioProject,
+  saveAiAnalysisNote,
+  saveAiFrontierCard,
+  saveRhythmLog,
+};
+
+function ruleDateBucket(value) {
+  if (!value) return "none";
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return "none";
+  const due = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.round((due.getTime() - today.getTime()) / 86400000);
+  if (days < 0) return "overdue";
+  if (days === 0) return "today";
+  if (days <= 7) return "soon";
+  return "future";
+}
+
+function dispatchPriorityFromDue(defaultPriority, dueAt) {
+  const bucket = ruleDateBucket(dueAt);
+  if (bucket === "overdue" || bucket === "today") return "critical";
+  if (bucket === "soon" && defaultPriority === "medium") return "high";
+  return defaultPriority;
+}
+
+function createDispatchItem(seed) {
+  return {
+    id: seed.id,
+    type: seed.type,
+    title: seed.title || "未命名事项",
+    meta: seed.meta || "",
+    module: seed.module,
+    targetId: seed.targetId || "",
+    priority: dispatchPriorityFromDue(seed.priority || "medium", seed.dueAt),
+    dueAt: seed.dueAt || "",
+    reason: seed.reason || "",
+    actionLabel: seed.actionLabel || "处理",
+  };
+}
+
+function buildDispatchQueue(data) {
+  const items = [];
+  const reviewedInterviewIds = new Set(data.reviews.map((review) => review.interviewRoundId));
+  const existingPortfolioProjectAmmoIds = new Set(
+    data.portfolioProjects.map((project) => project.projectAmmoId).filter(Boolean),
+  );
+
+  data.interviews
+    .filter((item) => !["completed", "reviewed", "cancelled"].includes(item.status))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `interview-prep-${item.id}`,
+          type: "interview-prep",
+          title: `${item.companyName} · ${item.roundName}`,
+          meta: `${item.roleTitle} · ${item.roundType}`,
+          module: "preInterview",
+          targetId: item.id,
+          dueAt: item.scheduledAt,
+          priority: item.preparationStatus === "needs_rework" ? "high" : "medium",
+          reason: `准备状态：${item.preparationStatus}`,
+          actionLabel: "进入作战室",
+        }),
+      );
+    });
+
+  data.interviews
+    .filter((item) => item.status === "completed" && !reviewedInterviewIds.has(item.id))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `interview-review-${item.id}`,
+          type: "interview-review",
+          title: `${item.companyName} · ${item.roundName}`,
+          meta: `${item.roleTitle} · 面试后复盘`,
+          module: "postInterview",
+          targetId: item.id,
+          priority: "critical",
+          reason: "已完成面试但还没有复盘记录",
+          actionLabel: "去复盘",
+        }),
+      );
+    });
+
+  data.opportunities
+    .filter((item) => item.riskLevel === "high")
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `opportunity-risk-${item.id}`,
+          type: "opportunity-risk",
+          title: `${item.companyName} · ${item.roleTitle}`,
+          meta: `阶段：${item.stage}`,
+          module: "pipeline",
+          targetId: item.id,
+          priority: "critical",
+          reason: "岗位风险等级为高",
+          actionLabel: "查看岗位",
+        }),
+      );
+    });
+
+  data.opportunities
+    .filter((item) => item.nextAction)
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `opportunity-action-${item.id}`,
+          type: "opportunity-action",
+          title: `${item.companyName} · ${item.roleTitle}`,
+          meta: item.nextAction,
+          module: "pipeline",
+          targetId: item.id,
+          dueAt: item.nextActionDueAt,
+          priority: item.priority === "high" ? "high" : "medium",
+          reason: "Pipeline 中有下一步动作",
+          actionLabel: "推进岗位",
+        }),
+      );
+    });
+
+  data.weaknesses
+    .filter((item) => ["open", "training", "validating"].includes(item.status))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `weakness-${item.id}`,
+          type: "weakness",
+          title: item.title,
+          meta: item.category,
+          module: "weakness",
+          targetId: item.id,
+          priority: item.severity === "high" ? "high" : "medium",
+          reason: `缺陷状态：${item.status}`,
+          actionLabel: "修复缺陷",
+        }),
+      );
+    });
+
+  data.trainingTasks
+    .filter((item) => ["todo", "doing", "reviewing"].includes(item.status))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `training-task-${item.id}`,
+          type: "training-task",
+          title: item.title,
+          meta: item.taskType,
+          module: "trainingTask",
+          targetId: item.id,
+          dueAt: item.dueAt,
+          priority: item.status === "reviewing" ? "high" : "medium",
+          reason: `训练状态：${item.status}`,
+          actionLabel: "处理训练",
+        }),
+      );
+    });
+
+  data.projectAmmos
+    .filter((item) => item.status === "needs_deepening" || (item.status === "usable" && !existingPortfolioProjectAmmoIds.has(item.id)))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `project-ammo-${item.id}`,
+          type: "project-ammo",
+          title: item.projectName,
+          meta: item.projectType,
+          module: "projectAmmo",
+          targetId: item.id,
+          priority: item.status === "needs_deepening" ? "high" : "low",
+          reason: item.status === "needs_deepening" ? "项目弹药需要继续深挖" : "可生成作品集项目卡",
+          actionLabel: "查看项目",
+        }),
+      );
+    });
+
+  data.followUpQuestions
+    .filter((item) => ["needs_drill", "unanswered", "drafted"].includes(item.status))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `follow-up-${item.id}`,
+          type: "follow-up",
+          title: item.question,
+          meta: item.questionType,
+          module: "followUpQuestion",
+          targetId: item.id,
+          priority: item.status === "needs_drill" ? "high" : "medium",
+          reason: `追问状态：${item.status}`,
+          actionLabel: "稳定回答",
+        }),
+      );
+    });
+
+  data.expressionDrills
+    .filter((item) => ["todo", "practicing", "reviewing"].includes(item.status) || item.score !== "stable")
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `expression-drill-${item.id}`,
+          type: "expression-drill",
+          title: item.question,
+          meta: item.sourceType,
+          module: "expressionDrill",
+          targetId: item.id,
+          priority: item.score === "unstable" ? "high" : "medium",
+          reason: `表达评分：${item.score}`,
+          actionLabel: "继续训练",
+        }),
+      );
+    });
+
+  data.expressionSessions
+    .filter((item) => item.status === "needs_rework" || (item.nextAction && item.status !== "stable"))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `expression-session-${item.id}`,
+          type: "expression-session",
+          title: item.question,
+          meta: `${item.attemptType} · ${item.selfRating}`,
+          module: "expressionSession",
+          targetId: item.id,
+          priority: item.status === "needs_rework" ? "high" : "medium",
+          reason: item.nextAction || "练习记录需要返工",
+          actionLabel: "复盘练习",
+        }),
+      );
+    });
+
+  data.portfolioProjects
+    .filter((item) => item.visibility === "portfolio" && item.readiness !== "ready")
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `portfolio-project-${item.id}`,
+          type: "portfolio-project",
+          title: item.displayTitle,
+          meta: item.readiness,
+          module: "portfolio",
+          targetId: item.id,
+          priority: item.readiness === "needs_sanitizing" ? "high" : "medium",
+          reason: "作品集项目已进入展示区但还没准备好",
+          actionLabel: "整理作品集",
+        }),
+      );
+    });
+
+  data.aiAnalysisNotes
+    .filter((item) => item.status === "ai_responded")
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `ai-analysis-${item.id}`,
+          type: "ai-analysis",
+          title: item.title,
+          meta: item.analysisType,
+          module: "aiAnalysis",
+          targetId: item.id,
+          priority: "critical",
+          reason: "AI 输出已粘贴，等待人工决策",
+          actionLabel: "做决策",
+        }),
+      );
+    });
+
+  data.aiFrontierCards
+    .filter((item) =>
+      item.status === "inbox" ||
+      (item.status === "summarized" && !String(item.interviewTransfer || "").trim()) ||
+      (item.priority === "high" && !["mapped", "applied", "archived"].includes(item.status)),
+    )
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `ai-frontier-${item.id}`,
+          type: "ai-frontier",
+          title: item.topic,
+          meta: item.category,
+          module: "aiFrontier",
+          targetId: item.id,
+          priority: item.priority === "high" || item.status === "inbox" ? "high" : "medium",
+          reason: item.status === "summarized" ? "已总结，等待面试迁移" : `前沿卡片状态：${item.status}`,
+          actionLabel: "消化前沿",
+        }),
+      );
+    });
+
+  data.rhythmLogs
+    .filter((item) =>
+      item.status === "recovery_needed" ||
+      (item.loadLevel === "high" && item.energyLevel === "low") ||
+      (item.nextAdjustment && !["closed", "archived"].includes(item.status)),
+    )
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `rhythm-${item.id}`,
+          type: "rhythm",
+          title: item.title,
+          meta: `${item.date} · 负荷 ${item.loadLevel} · 精力 ${item.energyLevel}`,
+          module: "rhythm",
+          targetId: item.id,
+          priority: item.status === "recovery_needed" || item.rhythmRisk === "high" ? "critical" : "high",
+          reason: item.status === "recovery_needed" ? "当前节奏需要恢复" : item.nextAdjustment || "高负荷且低精力",
+          actionLabel: "调整节奏",
+        }),
+      );
+    });
+
+  const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+  return items.sort((a, b) => {
+    const priorityDiff = (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9);
+    if (priorityDiff) return priorityDiff;
+    const bucketOrder = { overdue: 0, today: 1, soon: 2, later: 3, none: 4 };
+    const dueDiff = (bucketOrder[ruleDateBucket(a.dueAt)] ?? 4) - (bucketOrder[ruleDateBucket(b.dueAt)] ?? 4);
+    if (dueDiff) return dueDiff;
+    return String(a.title).localeCompare(String(b.title));
+  });
+}
+
+function buildDispatchMetrics(queue) {
+  return {
+    total: queue.length,
+    critical: queue.filter((item) => item.priority === "critical").length,
+    dueNow: queue.filter((item) => ["overdue", "today"].includes(ruleDateBucket(item.dueAt))).length,
+    decisions: queue.filter((item) => item.type === "ai-analysis" || item.type === "interview-review").length,
+  };
+}
+
+async function readSystemData() {
+  const [
+    opportunities,
+    interviews,
+    briefs,
+    reviews,
+    weaknesses,
+    trainingTasks,
+    projectAmmos,
+    followUpQuestions,
+    expressionDrills,
+    expressionSessions,
+    portfolioProfile,
+    portfolioProjects,
+    aiAnalysisNotes,
+    aiFrontierCards,
+    rhythmLogs,
+  ] = await Promise.all([
+    storage.listOpportunities(),
+    storage.listInterviews(),
+    storage.listBriefs(),
+    storage.listReviews(),
+    storage.listWeaknesses(),
+    storage.listTrainingTasks(),
+    storage.listProjectAmmos(),
+    storage.listFollowUpQuestions(),
+    storage.listExpressionDrills(),
+    storage.listExpressionSessions(),
+    storage.getPortfolioProfile(),
+    storage.listPortfolioProjects(),
+    storage.listAiAnalysisNotes(),
+    storage.listAiFrontierCards(),
+    storage.listRhythmLogs(),
+  ]);
+
+  return {
+    opportunities,
+    interviews,
+    briefs,
+    reviews,
+    weaknesses,
+    trainingTasks,
+    projectAmmos,
+    followUpQuestions,
+    expressionDrills,
+    expressionSessions,
+    portfolioProfile,
+    portfolioProjects,
+    aiAnalysisNotes,
+    aiFrontierCards,
+    rhythmLogs,
+  };
+}
+
+function buildSystemSnapshot(data) {
+  const activeOpportunities = data.opportunities.filter(
+    (item) => !["rejected", "offer", "paused"].includes(item.stage),
+  );
+  const reviewedInterviewIds = new Set(data.reviews.map((review) => review.interviewRoundId));
+  const dispatchQueue = buildDispatchQueue(data);
+  const portfolioReady = data.portfolioProjects.filter((project) => project.readiness === "ready").length;
+
+  return {
+    generatedAt: new Date().toISOString(),
+    dispatchQueue,
+    dispatchMetrics: buildDispatchMetrics(dispatchQueue),
+    pipelineMetrics: {
+      total: data.opportunities.length,
+      active: activeOpportunities.length,
+      withNextAction: data.opportunities.filter((item) => item.nextAction).length,
+      highRisk: data.opportunities.filter((item) => item.riskLevel === "high").length,
+    },
+    interviewMetrics: {
+      total: data.interviews.length,
+      needsPrep: data.interviews.filter((item) =>
+        ["not_started", "drafting", "needs_rework"].includes(item.preparationStatus),
+      ).length,
+      open: data.interviews.filter((item) => !["completed", "reviewed", "cancelled"].includes(item.status)).length,
+    },
+    reviewMetrics: {
+      total: data.reviews.length,
+      needsReview: data.interviews.filter((item) => item.status === "completed" && !reviewedInterviewIds.has(item.id)).length,
+      needsFollowup: data.reviews.filter((item) => item.status === "needs_followup").length,
+    },
+    weaknessMetrics: {
+      total: data.weaknesses.length,
+      open: data.weaknesses.filter((item) => item.status === "open").length,
+      training: data.weaknesses.filter((item) => item.status === "training").length,
+      high: data.weaknesses.filter((item) => item.severity === "high").length,
+    },
+    trainingTaskMetrics: {
+      total: data.trainingTasks.length,
+      active: data.trainingTasks.filter((item) => ["todo", "doing", "reviewing"].includes(item.status)).length,
+      reviewing: data.trainingTasks.filter((item) => item.status === "reviewing").length,
+      validated: data.trainingTasks.filter((item) => item.status === "validated").length,
+    },
+    portfolioMetrics: {
+      total: data.portfolioProjects.length,
+      visible: data.portfolioProjects.filter((item) => item.visibility === "portfolio").length,
+      ready: portfolioReady,
+      needsWork: data.portfolioProjects.length - portfolioReady,
+      portfolioStatus: data.portfolioProfile.portfolioStatus,
+    },
+    rhythmMetrics: {
+      total: data.rhythmLogs.length,
+      recoveryNeeded: data.rhythmLogs.filter((item) => item.status === "recovery_needed").length,
+      highRisk: data.rhythmLogs.filter((item) => item.rhythmRisk === "high").length,
+    },
+  };
+}
+
+async function systemSnapshot() {
+  return buildSystemSnapshot(await readSystemData());
+}
+
 function briefStatusToPreparationStatus(status) {
   if (status === "ready") return "ready";
   if (status === "needs_rework") return "needs_rework";
@@ -2459,6 +2947,14 @@ async function readRequestBody(req) {
 }
 
 async function handleApi(req, res, url) {
+  if (url.pathname === "/api/system-snapshot") {
+    if (req.method === "GET") {
+      return sendJson(res, 200, { snapshot: await systemSnapshot() });
+    }
+
+    return methodNotAllowed(res);
+  }
+
   if (url.pathname === "/api/opportunities") {
     if (req.method === "GET") {
       const opportunities = await listOpportunities();
