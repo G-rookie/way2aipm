@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.16";
+const APP_VERSION = "v0.17";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -645,11 +645,25 @@ function optionLabel(options, value) {
   return options.find(([key]) => key === value)?.[1] || value || "-";
 }
 
-function showToast(message) {
+function showToast(message, type = "success") {
   toast.textContent = message;
+  toast.classList.remove("success", "error", "info");
+  toast.classList.add(type);
   toast.classList.add("show");
   window.clearTimeout(showToast.timer);
   showToast.timer = window.setTimeout(() => toast.classList.remove("show"), 2200);
+}
+
+function showInfo(message) {
+  showToast(message, "info");
+}
+
+function showError(message) {
+  showToast(message, "error");
+}
+
+function disabledAttr(value) {
+  return value ? " disabled" : "";
 }
 
 function formatDateTime(value) {
@@ -777,7 +791,7 @@ async function loadData() {
       state.selectedExpressionSessionId = state.expressionSessions[0].id;
     }
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.loading = false;
     render();
@@ -893,7 +907,7 @@ function selectTrainingTask(id) {
 function beginTrainingTaskForSelectedWeakness() {
   const weakness = selectedWeakness();
   if (!weakness?.id) {
-    showToast("请先选择或保存一个能力缺陷");
+    showInfo("请先选择或保存一个能力缺陷");
     return;
   }
 
@@ -1506,7 +1520,7 @@ function beginNewRhythmLog() {
 function beginPortfolioProjectFromAmmo(ammoId) {
   const ammo = state.projectAmmos.find((item) => item.id === ammoId);
   if (!ammo) {
-    showToast("没有找到项目弹药");
+    showInfo("没有找到项目弹药");
     return;
   }
 
@@ -1574,7 +1588,7 @@ function beginNewProjectAmmo(seed = {}) {
 function beginNewFollowUpQuestion() {
   const ammo = selectedProjectAmmo();
   if (!ammo?.id || state.projectAmmoDraft) {
-    showToast("请先保存项目弹药，再添加追问");
+    showInfo("请先保存项目弹药，再添加追问");
     return;
   }
   state.followUpQuestionDraft = { ...EMPTY_FOLLOW_UP_QUESTION, projectAmmoId: ammo.id };
@@ -1587,7 +1601,7 @@ function beginNewFollowUpQuestion() {
 function beginExpressionDrillForSelectedQuestion() {
   const question = selectedFollowUpQuestion();
   if (!question?.id || state.followUpQuestionDraft) {
-    showToast("请先保存项目追问，再创建表达训练");
+    showInfo("请先保存项目追问，再创建表达训练");
     return;
   }
   state.expressionDrillDraft = {
@@ -1604,7 +1618,7 @@ function beginExpressionDrillForSelectedQuestion() {
 function beginExpressionDrillForSelectedWeakness() {
   const weakness = selectedWeakness();
   if (!weakness?.id || state.weaknessDraft) {
-    showToast("请先保存能力缺陷，再创建表达训练");
+    showInfo("请先保存能力缺陷，再创建表达训练");
     return;
   }
   state.expressionDrillDraft = {
@@ -1621,7 +1635,7 @@ function beginExpressionDrillForSelectedWeakness() {
 function beginExpressionDrillForSelectedTrainingTask() {
   const task = selectedTrainingTask();
   if (!task?.id || state.trainingTaskDraft) {
-    showToast("请先保存训练任务，再创建表达训练");
+    showInfo("请先保存训练任务，再创建表达训练");
     return;
   }
   state.expressionDrillDraft = {
@@ -1639,7 +1653,7 @@ function beginExpressionDrillForSelectedTrainingTask() {
 function beginExpressionSessionForSelectedDrill() {
   const drill = selectedExpressionDrill();
   if (!drill?.id || state.expressionDrillDraft) {
-    showToast("请先选择或保存一条表达训练");
+    showInfo("请先选择或保存一条表达训练");
     return;
   }
   const now = new Date();
@@ -1658,7 +1672,7 @@ function beginExpressionSessionForSelectedDrill() {
 function beginWeaknessFromSelectedReview() {
   const review = selectedReview();
   if (!review?.id) {
-    showToast("请先保存一份复盘");
+    showInfo("请先保存一份复盘");
     return;
   }
 
@@ -1700,7 +1714,7 @@ function selectOpportunity(id) {
 function beginNewInterview() {
   const opportunity = selectedOpportunity();
   if (!opportunity?.id) {
-    showToast("请先选择或保存一个岗位");
+    showInfo("请先选择或保存一个岗位");
     return;
   }
 
@@ -1851,7 +1865,7 @@ function openPreInterviewForInterview(id) {
 function beginBriefForSelectedInterview() {
   const interview = selectedInterview();
   if (!interview?.id) {
-    showToast("请先选择一轮面试");
+    showInfo("请先选择一轮面试");
     return;
   }
   state.briefDraft = {
@@ -1866,7 +1880,7 @@ function beginBriefForSelectedInterview() {
 function beginReviewForSelectedInterview() {
   const interview = selectedInterview();
   if (!interview?.id) {
-    showToast("请先选择一轮面试");
+    showInfo("请先选择一轮面试");
     return;
   }
   state.reviewDraft = {
@@ -2614,6 +2628,28 @@ function dispatchMetrics(queue) {
   };
 }
 
+function workbenchStatus() {
+  const queue = createDispatchQueue();
+  const dueNow = queue.filter((item) => ["overdue", "today"].includes(dateBucket(item.dueAt))).length;
+  return {
+    queueTotal: queue.length,
+    dueNow,
+    loadingLabel: state.loading ? "读取中" : "已同步",
+  };
+}
+
+function renderWorkbenchStatus() {
+  const status = workbenchStatus();
+  return `
+    <div class="workspace-status">
+      <span class="status-pill ${state.loading ? "loading" : "ready"}">${status.loadingLabel}</span>
+      <span>总控待办 ${status.queueTotal}</span>
+      <span>今日/逾期 ${status.dueNow}</span>
+      <span>Markdown 本地保存</span>
+    </div>
+  `;
+}
+
 function renderShell(content) {
   app.innerHTML = `
     <div class="app-shell">
@@ -2639,13 +2675,45 @@ function renderShell(content) {
           本地私用优先。岗位数据保存为 Markdown 文件，后续可以迁移到轻量数据库。
         </div>
       </aside>
-      <main class="main">${content}</main>
+      <main class="main">
+        ${renderWorkbenchStatus()}
+        ${content}
+      </main>
     </div>
   `;
 
   document.querySelectorAll("[data-module]").forEach((button) => {
     button.addEventListener("click", () => switchModule(button.dataset.module));
   });
+  document.querySelectorAll("[data-quick-action]").forEach((button) => {
+    button.addEventListener("click", () => handleQuickAction(button.dataset.quickAction));
+  });
+}
+
+function handleQuickAction(action) {
+  if (action === "new-opportunity") {
+    beginNewOpportunity();
+    return;
+  }
+  if (action === "global-search") {
+    state.activeModule = "globalSearch";
+    state.globalSearchQuery = "";
+    state.globalSearchFilter = "all";
+    render();
+    return;
+  }
+  if (action === "new-ai-analysis") {
+    beginNewAiAnalysisNote();
+    return;
+  }
+  if (action === "new-rhythm-log") {
+    beginNewRhythmLog();
+    return;
+  }
+  if (action === "training-plan") {
+    state.activeModule = "trainingPlan";
+    render();
+  }
 }
 
 function renderTopbar(title, subtitle, eyebrow = "way2AIPM OS") {
@@ -2710,8 +2778,17 @@ function renderPipelineBoard() {
 
   if (!state.opportunities.length) {
     return `
-      <div class="empty">
-        还没有岗位机会。先创建第一个岗位，Pipeline 就会开始运转。
+      <div class="empty empty-onboarding">
+        <h3>从第一条岗位机会开始</h3>
+        <p>先把岗位保存下来，后续就能串起面试轮次、作战 Brief、复盘、缺陷和训练。</p>
+        <ol>
+          <li>创建第一个岗位机会</li>
+          <li>粘贴 JD 或记录来源</li>
+          <li>收到邀约后创建一面、二面或 HR 面</li>
+          <li>面试前写 Brief，面试后做复盘</li>
+          <li>从复盘沉淀缺陷和训练任务</li>
+        </ol>
+        <button class="btn primary" data-quick-action="new-opportunity" type="button">创建第一个岗位</button>
       </div>
     `;
   }
@@ -2831,7 +2908,7 @@ function renderInterviewForm(opportunity) {
       <div class="form-field full">
         <div class="actions">
           ${isNew ? `<button class="btn" id="cancel-interview-btn" type="button">取消</button>` : ""}
-          <button class="btn primary" type="submit">${state.savingInterview ? "保存中..." : "保存面试轮次"}</button>
+          <button class="btn primary" type="submit"${disabledAttr(state.savingInterview)}>${state.savingInterview ? "保存中..." : "保存面试轮次"}</button>
         </div>
         <div class="status-line">${interview.updatedAt ? `上次更新：${escapeHtml(interview.updatedAt)}` : ""}</div>
       </div>
@@ -2937,7 +3014,7 @@ function renderDetailPanel() {
           <div class="form-field full">
             <div class="actions">
               ${isNew ? `<button class="btn" id="cancel-new-btn" type="button">取消</button>` : ""}
-              <button class="btn primary" type="submit">${state.saving ? "保存中..." : "保存 Markdown"}</button>
+              <button class="btn primary" type="submit"${disabledAttr(state.saving)}>${state.saving ? "保存中..." : "保存 Markdown"}</button>
             </div>
             <div class="status-line">${opportunity.updatedAt ? `上次更新：${escapeHtml(opportunity.updatedAt)}` : ""}</div>
           </div>
@@ -3302,7 +3379,7 @@ async function submitOpportunity(event) {
     const briefList = await api("/api/pre-interview-briefs");
     state.briefs = briefList.briefs || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.saving = false;
     render();
@@ -3345,7 +3422,7 @@ async function submitInterview(event) {
     state.briefs = briefList.briefs || [];
     state.reviews = reviewList.reviews || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingInterview = false;
     render();
@@ -3409,7 +3486,7 @@ async function submitBrief(event) {
     state.briefs = briefList.briefs || [];
     state.interviews = interviewList.interviews || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingBrief = false;
     render();
@@ -3475,7 +3552,7 @@ async function submitReview(event) {
     state.interviews = interviewList.interviews || [];
     state.weaknesses = weaknessList.weaknesses || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingReview = false;
     render();
@@ -3536,7 +3613,7 @@ async function submitWeakness(event) {
     state.reviews = reviewList.reviews || [];
     state.trainingTasks = trainingTaskList.tasks || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingWeakness = false;
     render();
@@ -3598,7 +3675,7 @@ async function submitTrainingTask(event) {
     state.trainingTasks = taskList.tasks || [];
     state.weaknesses = weaknessList.weaknesses || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingTrainingTask = false;
     render();
@@ -3658,7 +3735,7 @@ async function submitProjectAmmo(event) {
     const list = await api("/api/project-ammos");
     state.projectAmmos = list.projectAmmos || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingProjectAmmo = false;
     render();
@@ -3713,7 +3790,7 @@ async function submitFollowUpQuestion(event) {
     const list = await api("/api/follow-up-questions");
     state.followUpQuestions = list.followUpQuestions || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingFollowUpQuestion = false;
     render();
@@ -3771,7 +3848,7 @@ async function submitExpressionDrill(event) {
     state.expressionDrills = drillList.expressionDrills || [];
     state.followUpQuestions = questionList.followUpQuestions || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingExpressionDrill = false;
     render();
@@ -3828,7 +3905,7 @@ async function submitExpressionSession(event) {
     const list = await api("/api/expression-sessions");
     state.expressionSessions = list.expressionSessions || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingExpressionSession = false;
     render();
@@ -3867,7 +3944,7 @@ async function submitPortfolioProfile(event) {
     state.portfolioProfile = result.profile;
     showToast("作品集资料已保存");
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingPortfolioProfile = false;
     render();
@@ -3928,7 +4005,7 @@ async function submitPortfolioProject(event) {
     const list = await api("/api/portfolio-projects");
     state.portfolioProjects = list.portfolioProjects || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingPortfolioProject = false;
     render();
@@ -3983,7 +4060,7 @@ async function generateAiAnalysisContext() {
     }
     showToast("上下文和提示词已生成");
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.generatingAiContext = false;
     render();
@@ -4019,7 +4096,7 @@ async function submitAiAnalysisNote(event) {
     const list = await api("/api/ai-analysis-notes");
     state.aiAnalysisNotes = list.aiAnalysisNotes || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingAiAnalysisNote = false;
     render();
@@ -4075,7 +4152,7 @@ async function submitAiFrontierCard(event) {
     const list = await api("/api/ai-frontier-cards");
     state.aiFrontierCards = list.aiFrontierCards || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingAiFrontierCard = false;
     render();
@@ -4132,7 +4209,7 @@ async function submitRhythmLog(event) {
     const list = await api("/api/rhythm-logs");
     state.rhythmLogs = list.rhythmLogs || [];
   } catch (error) {
-    showToast(error.message);
+    showError(error.message);
   } finally {
     state.savingRhythmLog = false;
     render();
@@ -4275,6 +4352,42 @@ function renderGlobalSearchResults(results) {
   `;
 }
 
+function renderTodayActions(queue) {
+  const dueNow = queue.filter((item) => ["overdue", "today"].includes(dateBucket(item.dueAt))).length;
+  const openTraining = state.trainingTasks.filter((item) => ["todo", "doing", "reviewing"].includes(item.status)).length;
+  return `
+    <section class="daily-actions">
+      <div>
+        <p class="eyebrow">Today Actions</p>
+        <h2>今天先处理这些入口</h2>
+        <p>${dueNow ? `有 ${dueNow} 个今日/逾期事项需要关注。` : "当前没有今日到期压力，可以补记录或推进训练。"}</p>
+      </div>
+      <div class="daily-action-grid">
+        <button class="quick-action" data-quick-action="new-opportunity" type="button">
+          <span>新增岗位</span>
+          <strong>记录新机会</strong>
+        </button>
+        <button class="quick-action" data-quick-action="global-search" type="button">
+          <span>全局检索</span>
+          <strong>快速找材料</strong>
+        </button>
+        <button class="quick-action" data-quick-action="new-ai-analysis" type="button">
+          <span>AI 分析</span>
+          <strong>生成上下文</strong>
+        </button>
+        <button class="quick-action" data-quick-action="new-rhythm-log" type="button">
+          <span>今日节奏</span>
+          <strong>记录负荷</strong>
+        </button>
+        <button class="quick-action" data-quick-action="training-plan" type="button">
+          <span>训练计划</span>
+          <strong>${openTraining} 个进行中</strong>
+        </button>
+      </div>
+    </section>
+  `;
+}
+
 function renderDashboard() {
   const topbar = renderTopbar(
     "总控台",
@@ -4312,6 +4425,7 @@ function renderDashboard() {
   return `
     ${topbar}
     ${renderMetricGrid()}
+    ${renderTodayActions(dispatchQueue)}
     ${renderDispatchOverview(dispatchQueue)}
     <div class="dashboard-grid">
       <section class="panel">
@@ -4724,7 +4838,7 @@ function renderBriefForm(interview) {
           <div class="form-field full">
             <div class="actions">
               ${isNew ? `<button class="btn" id="cancel-brief-btn" type="button">取消</button>` : ""}
-              <button class="btn primary" type="submit">${state.savingBrief ? "保存中..." : "保存作战 Brief"}</button>
+              <button class="btn primary" type="submit"${disabledAttr(state.savingBrief)}>${state.savingBrief ? "保存中..." : "保存作战 Brief"}</button>
             </div>
             <div class="status-line">${brief.updatedAt ? `上次更新：${escapeHtml(brief.updatedAt)}` : "保存后会写入 content/pre-interview-briefs。"}</div>
           </div>
@@ -4979,7 +5093,7 @@ function renderReviewForm(interview) {
           <div class="form-field full">
             <div class="actions">
               ${isNew ? `<button class="btn" id="cancel-review-btn" type="button">取消</button>` : ""}
-              <button class="btn primary" type="submit">${state.savingReview ? "保存中..." : "保存面试复盘"}</button>
+              <button class="btn primary" type="submit"${disabledAttr(state.savingReview)}>${state.savingReview ? "保存中..." : "保存面试复盘"}</button>
             </div>
             <div class="status-line">${review.updatedAt ? `上次更新：${escapeHtml(review.updatedAt)}` : "保存后会写入 content/interview-reviews。"}</div>
           </div>
@@ -5252,7 +5366,7 @@ function renderWeaknessDetail(weakness) {
           <div class="form-field full">
             <div class="actions">
               ${isNew ? `<button class="btn" id="cancel-weakness-btn" type="button">取消</button>` : ""}
-              <button class="btn primary" type="submit">${state.savingWeakness ? "保存中..." : "保存能力缺陷"}</button>
+              <button class="btn primary" type="submit"${disabledAttr(state.savingWeakness)}>${state.savingWeakness ? "保存中..." : "保存能力缺陷"}</button>
             </div>
             <div class="status-line">${weakness.updatedAt ? `上次更新：${escapeHtml(weakness.updatedAt)}` : "保存后会写入 content/weaknesses。"}</div>
           </div>
@@ -5383,7 +5497,7 @@ function renderProjectAmmoDetail(ammo) {
           <div class="form-field full">
             <div class="actions">
               ${isNew ? `<button class="btn" id="cancel-project-ammo-btn" type="button">取消</button>` : ""}
-              <button class="btn primary" type="submit">${state.savingProjectAmmo ? "保存中..." : "保存项目弹药"}</button>
+              <button class="btn primary" type="submit"${disabledAttr(state.savingProjectAmmo)}>${state.savingProjectAmmo ? "保存中..." : "保存项目弹药"}</button>
             </div>
             <div class="status-line">${ammo.updatedAt ? `上次更新：${escapeHtml(ammo.updatedAt)}` : "保存后会写入 content/project-ammos。"}</div>
           </div>
@@ -5481,7 +5595,7 @@ function renderFollowUpQuestionForm(ammo) {
       <div class="form-field full">
         <div class="actions">
           ${isNew ? `<button class="btn" id="cancel-follow-up-question-btn" type="button">取消</button>` : ""}
-          <button class="btn primary" type="submit">${state.savingFollowUpQuestion ? "保存中..." : "保存项目追问"}</button>
+          <button class="btn primary" type="submit"${disabledAttr(state.savingFollowUpQuestion)}>${state.savingFollowUpQuestion ? "保存中..." : "保存项目追问"}</button>
         </div>
         <div class="status-line">${question.updatedAt ? `上次更新：${escapeHtml(question.updatedAt)}` : "保存后会写入 content/follow-up-questions。"}</div>
       </div>
@@ -5585,7 +5699,7 @@ function renderExpressionDrillFormForSource(sourceType, sourceId) {
       <div class="form-field full">
         <div class="actions">
           ${isNew ? `<button class="btn" id="cancel-expression-drill-btn" type="button">取消</button>` : ""}
-          <button class="btn primary" type="submit">${state.savingExpressionDrill ? "保存中..." : "保存表达训练"}</button>
+          <button class="btn primary" type="submit"${disabledAttr(state.savingExpressionDrill)}>${state.savingExpressionDrill ? "保存中..." : "保存表达训练"}</button>
         </div>
         <div class="status-line">${drill.updatedAt ? `上次更新：${escapeHtml(drill.updatedAt)}` : "保存后会写入 content/expression-drills。"}</div>
       </div>
@@ -5905,7 +6019,7 @@ function renderTrainingTaskForm(weakness) {
       <div class="form-field full">
         <div class="actions">
           ${isNew ? `<button class="btn" id="cancel-training-task-btn" type="button">取消</button>` : ""}
-          <button class="btn primary" type="submit">${state.savingTrainingTask ? "保存中..." : "保存训练任务"}</button>
+          <button class="btn primary" type="submit"${disabledAttr(state.savingTrainingTask)}>${state.savingTrainingTask ? "保存中..." : "保存训练任务"}</button>
         </div>
         <div class="status-line">${task.updatedAt ? `上次更新：${escapeHtml(task.updatedAt)}` : "保存后会写入 content/training-tasks。"}</div>
       </div>
@@ -5993,7 +6107,7 @@ function renderPortfolioProfileForm() {
       ${renderBriefField("publishChecklist", "发布准备清单", profile.publishChecklist, "逐行记录公开前需要检查的事项")}
       <div class="form-field full">
         <div class="actions">
-          <button class="btn primary" type="submit">${state.savingPortfolioProfile ? "保存中..." : "保存作品集资料"}</button>
+          <button class="btn primary" type="submit"${disabledAttr(state.savingPortfolioProfile)}>${state.savingPortfolioProfile ? "保存中..." : "保存作品集资料"}</button>
         </div>
         <div class="status-line">${profile.updatedAt ? `上次更新：${escapeHtml(profile.updatedAt)}` : "保存后会写入 content/portfolio/profile.md。"}</div>
       </div>
@@ -6130,7 +6244,7 @@ function renderPortfolioProjectDetail() {
           <div class="form-field full">
             <div class="actions">
               ${isNew ? `<button class="btn" id="cancel-portfolio-project-btn" type="button">取消</button>` : ""}
-              <button class="btn primary" type="submit">${state.savingPortfolioProject ? "保存中..." : "保存项目卡"}</button>
+              <button class="btn primary" type="submit"${disabledAttr(state.savingPortfolioProject)}>${state.savingPortfolioProject ? "保存中..." : "保存项目卡"}</button>
             </div>
             <div class="status-line">${project.updatedAt ? `上次更新：${escapeHtml(project.updatedAt)}` : "保存后会写入 content/portfolio-projects。"}</div>
           </div>
@@ -6344,8 +6458,8 @@ function renderAiAnalysisDetail(note) {
           <div class="form-field full">
             <div class="actions">
               ${isNew ? `<button class="btn" id="cancel-ai-analysis-btn" type="button">取消</button>` : ""}
-              <button class="btn" id="generate-ai-context-btn" type="button">${state.generatingAiContext ? "生成中..." : "生成上下文与提示词"}</button>
-              <button class="btn primary" type="submit">${state.savingAiAnalysisNote ? "保存中..." : "保存分析记录"}</button>
+              <button class="btn" id="generate-ai-context-btn" type="button"${disabledAttr(state.generatingAiContext)}>${state.generatingAiContext ? "生成中..." : "生成上下文与提示词"}</button>
+              <button class="btn primary" type="submit"${disabledAttr(state.savingAiAnalysisNote)}>${state.savingAiAnalysisNote ? "保存中..." : "保存分析记录"}</button>
             </div>
             <div class="status-line">${note.updatedAt ? `上次更新：${escapeHtml(note.updatedAt)}` : "保存后会写入 content/ai-analysis-notes。"}</div>
           </div>
@@ -6493,7 +6607,7 @@ function renderAiFrontierDetail(card) {
           <div class="form-field full">
             <div class="actions">
               ${isNew ? `<button class="btn" id="cancel-ai-frontier-card-btn" type="button">取消</button>` : ""}
-              <button class="btn primary" type="submit">${state.savingAiFrontierCard ? "保存中..." : "保存前沿卡片"}</button>
+              <button class="btn primary" type="submit"${disabledAttr(state.savingAiFrontierCard)}>${state.savingAiFrontierCard ? "保存中..." : "保存前沿卡片"}</button>
             </div>
             <div class="status-line">${card.updatedAt ? `上次更新：${escapeHtml(card.updatedAt)}` : "保存后会写入 content/ai-frontier-cards。"}</div>
           </div>
@@ -6645,7 +6759,7 @@ function renderRhythmDetail(log) {
           <div class="form-field full">
             <div class="actions">
               ${isNew ? `<button class="btn" id="cancel-rhythm-log-btn" type="button">取消</button>` : ""}
-              <button class="btn primary" type="submit">${state.savingRhythmLog ? "保存中..." : "保存节奏记录"}</button>
+              <button class="btn primary" type="submit"${disabledAttr(state.savingRhythmLog)}>${state.savingRhythmLog ? "保存中..." : "保存节奏记录"}</button>
             </div>
             <div class="status-line">${log.updatedAt ? `上次更新：${escapeHtml(log.updatedAt)}` : "保存后会写入 content/rhythm-logs。"}</div>
           </div>
@@ -6811,7 +6925,7 @@ function renderExpressionSessionForm(drill) {
       <div class="form-field full">
         <div class="actions">
           ${isNew ? `<button class="btn" id="cancel-expression-session-btn" type="button">取消</button>` : ""}
-          <button class="btn primary" type="submit">${state.savingExpressionSession ? "保存中..." : "保存练习记录"}</button>
+          <button class="btn primary" type="submit"${disabledAttr(state.savingExpressionSession)}>${state.savingExpressionSession ? "保存中..." : "保存练习记录"}</button>
         </div>
         <div class="status-line">${session.updatedAt ? `上次更新：${escapeHtml(session.updatedAt)}` : "保存后会写入 content/expression-sessions。"}</div>
       </div>
