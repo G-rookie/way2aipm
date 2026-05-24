@@ -427,7 +427,8 @@ h1 {
 }
 
 .tag.review-score,
-.tag.review-category {
+.tag.review-category,
+.tag.war-score {
   background: var(--blue-bg);
   color: var(--blue);
 }
@@ -1060,6 +1061,48 @@ textarea:focus {
   background: var(--yellow-bg);
 }
 
+.war-room {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 18px;
+}
+
+.war-room-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.war-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 13px;
+  background: var(--surface);
+}
+
+.war-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.war-card-head span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.war-card-head strong {
+  font-size: 14px;
+  text-align: right;
+}
+
+.checklist-stats {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .compact-form textarea {
   min-height: 88px;
 }
@@ -1392,6 +1435,7 @@ textarea:focus {
   .pre-interview-layout,
   .training-closure-grid,
   .review-committee-grid,
+  .war-room-grid,
   .answer-stats,
   .placeholder-grid,
   .portfolio-preview-grid {

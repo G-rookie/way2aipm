@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.14";
+const APP_VERSION = "v0.15";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -1929,6 +1929,86 @@ function reviewMetrics() {
     total: state.reviews.length,
     needsReview,
     followup: state.reviews.filter((review) => review.status === "needs_followup").length,
+  };
+}
+
+function briefCompletionItems(brief) {
+  return [
+    ["companyResearch", "公司调研", brief.companyResearch],
+    ["businessSummary", "业务理解", brief.businessSummary],
+    ["productSummary", "产品理解", brief.productSummary],
+    ["jdRequirements", "JD 拆解", brief.jdRequirements],
+    ["hiddenExpectations", "隐性期待", brief.hiddenExpectations],
+    ["matchingEvidence", "匹配证据", brief.matchingEvidence],
+    ["riskGaps", "风险缺口", brief.riskGaps],
+    ["projectMapping", "项目映射", brief.projectMapping],
+    ["questionPredictions", "题目预测", brief.questionPredictions],
+    ["highRiskQuestions", "高风险问题", brief.highRiskQuestions],
+    ["prepChecklist", "准备清单", brief.prepChecklist],
+  ].map(([key, label, value]) => ({
+    key,
+    label,
+    done: Boolean(String(value || "").trim()),
+  }));
+}
+
+function checklistStats(value) {
+  const lines = nonEmptyLines(value);
+  const checked = lines.filter((line) => /^[-*]\s+\[[xX]\]/.test(line)).length;
+  const unchecked = lines.filter((line) => /^[-*]\s+\[\s\]/.test(line)).length;
+  const total = checked + unchecked;
+  return {
+    total,
+    checked,
+    unchecked,
+    rawItems: total || lines.length,
+  };
+}
+
+function briefWarRoomStats(brief) {
+  const completionItems = briefCompletionItems(brief);
+  const completed = completionItems.filter((item) => item.done).length;
+  const checklist = checklistStats(brief.prepChecklist);
+  return {
+    completionItems,
+    completed,
+    total: completionItems.length,
+    completionRate: Math.round((completed / completionItems.length) * 100),
+    checklist,
+    jdCount: nonEmptyLines(brief.jdRequirements).length,
+    evidenceCount: nonEmptyLines(brief.matchingEvidence).length + nonEmptyLines(brief.projectMapping).length,
+    predictionCount: nonEmptyLines(brief.questionPredictions).length,
+    riskCount: nonEmptyLines(brief.riskGaps).length + nonEmptyLines(brief.highRiskQuestions).length,
+  };
+}
+
+function briefWarRoomAdvice(brief) {
+  const stats = briefWarRoomStats(brief);
+  if (brief.status !== "ready" || stats.completionRate < 75) {
+    return {
+      tone: "attention",
+      title: "先补齐作战关键区",
+      body: "建议优先补齐 JD 拆解、匹配证据、风险缺口和高风险问题，再进入面试。",
+    };
+  }
+  if (stats.riskCount > 0 && !String(brief.highRiskQuestions || "").trim()) {
+    return {
+      tone: "attention",
+      title: "风险问题还缺预案",
+      body: "已经识别出风险缺口，但高风险问题还没有形成回答方向，建议先补上。",
+    };
+  }
+  if (stats.checklist.total && stats.checklist.unchecked > 0) {
+    return {
+      tone: "attention",
+      title: "准备清单还有未完成项",
+      body: `当前还有 ${stats.checklist.unchecked} 项准备动作未完成，面试前最好逐项处理。`,
+    };
+  }
+  return {
+    tone: "done",
+    title: "作战准备较完整",
+    body: "当前 Brief 已具备面试执行条件，面试后记得回到复盘室记录真实问题。",
   };
 }
 
@@ -4538,6 +4618,7 @@ function renderBriefForm(interview) {
         </div>
       </div>
       <div class="panel-body">
+        ${renderBriefWarRoom(brief)}
         <form id="brief-form" class="form-grid brief-form">
           <div class="form-field">
             <label>Brief 状态</label>
@@ -4570,6 +4651,74 @@ function renderBriefForm(interview) {
         </form>
       </div>
     </section>
+  `;
+}
+
+function renderBriefWarRoom(brief) {
+  const stats = briefWarRoomStats(brief);
+  const advice = briefWarRoomAdvice(brief);
+
+  return `
+    <section class="war-room">
+      <div class="section-heading">
+        <div>
+          <h3>作战态势</h3>
+          <p>先判断准备完整度，再检查 JD、项目证据、问题预测和高风险预案。</p>
+        </div>
+        <span class="tag war-score">${stats.completionRate}% 完整</span>
+      </div>
+      <div class="war-room-grid">
+        <div class="war-card">
+          <div class="war-card-head">
+            <span>准备完整度</span>
+            <strong>${stats.completed}/${stats.total}</strong>
+          </div>
+          <div class="committee-checks">
+            ${stats.completionItems
+              .map(
+                (item) => `
+                  <span class="committee-check ${item.done ? "done" : "todo"}">
+                    ${item.done ? "已准备" : "待补充"} · ${item.label}
+                  </span>
+                `,
+              )
+              .join("")}
+          </div>
+        </div>
+        <div class="war-card">
+          <div class="war-card-head">
+            <span>作战重点</span>
+            <strong>${optionLabel(BRIEF_STATUSES, brief.status)}</strong>
+          </div>
+          <div class="answer-stats">
+            <div><span>JD</span><strong>${stats.jdCount}</strong></div>
+            <div><span>证据</span><strong>${stats.evidenceCount}</strong></div>
+            <div><span>预测</span><strong>${stats.predictionCount}</strong></div>
+            <div><span>风险</span><strong>${stats.riskCount}</strong></div>
+          </div>
+          <p class="mini-meta">按换行统计条目，用来快速判断准备材料是否够密。</p>
+        </div>
+        <div class="war-card">
+          <div class="war-card-head">
+            <span>准备清单</span>
+            <strong>${stats.checklist.total ? `${stats.checklist.checked}/${stats.checklist.total}` : "未拆项"}</strong>
+          </div>
+          <div class="answer-stats checklist-stats">
+            <div><span>总项</span><strong>${stats.checklist.total || stats.checklist.rawItems}</strong></div>
+            <div><span>已完成</span><strong>${stats.checklist.checked}</strong></div>
+            <div><span>未完成</span><strong>${stats.checklist.unchecked}</strong></div>
+          </div>
+          <p class="mini-meta">支持 Markdown checkbox：- [ ] / - [x]。</p>
+        </div>
+      </div>
+      <div class="closure-advice ${advice.tone}">
+        <div>
+          <strong>${escapeHtml(advice.title)}</strong>
+          <p>${escapeHtml(advice.body)}</p>
+        </div>
+      </div>
+    </section>
+    <div class="detail-divider"></div>
   `;
 }
 
