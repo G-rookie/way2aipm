@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.17";
+const APP_VERSION = "v0.18";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -589,6 +589,13 @@ const state = {
   selectedExpressionSessionId: null,
   globalSearchQuery: "",
   globalSearchFilter: "all",
+  pipelineFilters: {
+    stage: "all",
+    priority: "all",
+    riskLevel: "all",
+    nextAction: "all",
+    interview: "all",
+  },
   trainingPlanView: "overview",
   selectedPortfolioProjectId: null,
   selectedAiAnalysisNoteId: null,
@@ -624,6 +631,7 @@ const state = {
   savingAiAnalysisNote: false,
   savingAiFrontierCard: false,
   savingRhythmLog: false,
+  quickSavingOpportunityId: null,
   generatingAiContext: false,
 };
 
@@ -1900,9 +1908,38 @@ function switchModule(module) {
   render();
 }
 
-function groupByStage() {
+function hasOpenInterview(opportunityId) {
+  return interviewsForOpportunity(opportunityId).some(
+    (interview) => !["completed", "reviewed", "cancelled"].includes(interview.status),
+  );
+}
+
+function filteredPipelineOpportunities() {
+  const filters = state.pipelineFilters;
+  return state.opportunities.filter((opportunity) => {
+    if (filters.stage !== "all" && opportunity.stage !== filters.stage) return false;
+    if (filters.priority !== "all" && opportunity.priority !== filters.priority) return false;
+    if (filters.riskLevel !== "all" && opportunity.riskLevel !== filters.riskLevel) return false;
+    if (filters.nextAction === "with" && !opportunity.nextAction) return false;
+    if (filters.nextAction === "without" && opportunity.nextAction) return false;
+    if (filters.interview === "open" && !hasOpenInterview(opportunity.id)) return false;
+    if (filters.interview === "none" && hasOpenInterview(opportunity.id)) return false;
+    return true;
+  });
+}
+
+function pipelineFilterMetrics(opportunities = filteredPipelineOpportunities()) {
+  return {
+    visible: opportunities.length,
+    withNextAction: opportunities.filter((item) => item.nextAction).length,
+    highRisk: opportunities.filter((item) => item.riskLevel === "high").length,
+    withOpenInterview: opportunities.filter((item) => hasOpenInterview(item.id)).length,
+  };
+}
+
+function groupByStage(opportunities = state.opportunities) {
   const groups = Object.fromEntries(STAGES.map(([stage]) => [stage, []]));
-  for (const opportunity of state.opportunities) {
+  for (const opportunity of opportunities) {
     const stage = groups[opportunity.stage] ? opportunity.stage : "collected";
     groups[stage].push(opportunity);
   }
@@ -2749,6 +2786,7 @@ function renderMetricGrid() {
 function renderOpportunityCard(opportunity) {
   const active = state.selectedId === opportunity.id;
   const nextInterview = nextInterviewForOpportunity(opportunity.id);
+  const isSaving = state.quickSavingOpportunityId === opportunity.id;
   const nextAction = opportunity.nextAction
     ? `<p class="next-action">下一步：${escapeHtml(opportunity.nextAction)}</p>`
     : "";
@@ -2756,22 +2794,44 @@ function renderOpportunityCard(opportunity) {
     ? `<p class="next-action">面试：${escapeHtml(nextInterview.roundName)}${nextInterview.scheduledAt ? ` · ${escapeHtml(formatDateTime(nextInterview.scheduledAt))}` : ""} · ${escapeHtml(briefStatusForInterview(nextInterview.id))}</p>`
     : "";
   return `
-    <button class="opp-card ${active ? "active" : ""}" data-select-id="${escapeHtml(opportunity.id)}" type="button">
-      <p class="opp-company">${escapeHtml(opportunity.companyName)}</p>
-      <p class="opp-role">${escapeHtml(opportunity.roleTitle)}</p>
-      <div class="tag-row">
-        <span class="tag stage">${optionLabel(STAGES, opportunity.stage)}</span>
-        <span class="tag priority-${opportunity.priority}">P ${optionLabel(PRIORITIES, opportunity.priority)}</span>
-        <span class="tag risk-${opportunity.riskLevel}">风险 ${optionLabel(RISK_LEVELS, opportunity.riskLevel)}</span>
-      </div>
-      ${nextAction}
-      ${interviewLine}
-    </button>
+    <article class="opp-card ${active ? "active" : ""}">
+      <button class="opp-card-main" data-select-id="${escapeHtml(opportunity.id)}" type="button">
+        <p class="opp-company">${escapeHtml(opportunity.companyName)}</p>
+        <p class="opp-role">${escapeHtml(opportunity.roleTitle)}</p>
+        <div class="tag-row">
+          <span class="tag stage">${optionLabel(STAGES, opportunity.stage)}</span>
+          <span class="tag priority-${opportunity.priority}">P ${optionLabel(PRIORITIES, opportunity.priority)}</span>
+          <span class="tag risk-${opportunity.riskLevel}">风险 ${optionLabel(RISK_LEVELS, opportunity.riskLevel)}</span>
+        </div>
+        ${nextAction}
+        ${interviewLine}
+      </button>
+      <form class="pipeline-quick-form" data-pipeline-quick-form="${escapeHtml(opportunity.id)}">
+        <div class="quick-field">
+          <label>阶段</label>
+          ${renderSelect("stage", STAGES, opportunity.stage)}
+        </div>
+        <div class="quick-field">
+          <label>优先级</label>
+          ${renderSelect("priority", PRIORITIES, opportunity.priority)}
+        </div>
+        <div class="quick-field">
+          <label>风险</label>
+          ${renderSelect("riskLevel", RISK_LEVELS, opportunity.riskLevel)}
+        </div>
+        <div class="quick-field full">
+          <label>下一步</label>
+          <input name="nextAction" value="${escapeHtml(opportunity.nextAction)}" placeholder="例如：补 JD 拆解" />
+        </div>
+        <button class="btn compact" type="submit"${disabledAttr(isSaving)}>${isSaving ? "保存中..." : "快速保存"}</button>
+      </form>
+    </article>
   `;
 }
 
 function renderPipelineBoard() {
-  const groups = groupByStage();
+  const visibleOpportunities = filteredPipelineOpportunities();
+  const groups = groupByStage(visibleOpportunities);
   if (state.loading) {
     return `<div class="empty">正在读取 Markdown 记录...</div>`;
   }
@@ -2793,7 +2853,15 @@ function renderPipelineBoard() {
     `;
   }
 
+  if (!visibleOpportunities.length) {
+    return `
+      ${renderPipelineControls(visibleOpportunities)}
+      <div class="empty">当前筛选下没有岗位机会。可以清空筛选，或新增一个更匹配当前条件的岗位。</div>
+    `;
+  }
+
   return `
+    ${renderPipelineControls(visibleOpportunities)}
     <div class="pipeline">
       ${STAGES.map(
         ([stage, label]) => `
@@ -2809,6 +2877,44 @@ function renderPipelineBoard() {
         `,
       ).join("")}
     </div>
+  `;
+}
+
+function renderPipelineControls(opportunities) {
+  const filters = state.pipelineFilters;
+  const data = pipelineFilterMetrics(opportunities);
+  return `
+    <section class="pipeline-controls">
+      <form id="pipeline-filter-form" class="pipeline-filter-form">
+        <div class="quick-field">
+          <label>阶段</label>
+          ${renderSelect("stage", [["all", "全部阶段"], ...STAGES], filters.stage)}
+        </div>
+        <div class="quick-field">
+          <label>优先级</label>
+          ${renderSelect("priority", [["all", "全部优先级"], ...PRIORITIES], filters.priority)}
+        </div>
+        <div class="quick-field">
+          <label>风险</label>
+          ${renderSelect("riskLevel", [["all", "全部风险"], ...RISK_LEVELS], filters.riskLevel)}
+        </div>
+        <div class="quick-field">
+          <label>下一步</label>
+          ${renderSelect("nextAction", [["all", "全部"], ["with", "有下一步"], ["without", "无下一步"]], filters.nextAction)}
+        </div>
+        <div class="quick-field">
+          <label>面试</label>
+          ${renderSelect("interview", [["all", "全部"], ["open", "有未完成面试"], ["none", "暂无未完成面试"]], filters.interview)}
+        </div>
+        <button class="btn" id="clear-pipeline-filters-btn" type="button">清空</button>
+      </form>
+      <div class="pipeline-filter-metrics">
+        <span>可见 ${data.visible}</span>
+        <span>下一步 ${data.withNextAction}</span>
+        <span>高风险 ${data.highRisk}</span>
+        <span>面试中 ${data.withOpenInterview}</span>
+      </div>
+    </section>
   `;
 }
 
@@ -3026,6 +3132,30 @@ function renderDetailPanel() {
 }
 
 function attachCommonEvents() {
+  document.querySelector("#pipeline-filter-form")?.addEventListener("change", (event) => {
+    const formData = new FormData(event.currentTarget);
+    state.pipelineFilters = {
+      stage: String(formData.get("stage") || "all"),
+      priority: String(formData.get("priority") || "all"),
+      riskLevel: String(formData.get("riskLevel") || "all"),
+      nextAction: String(formData.get("nextAction") || "all"),
+      interview: String(formData.get("interview") || "all"),
+    };
+    render();
+  });
+  document.querySelector("#clear-pipeline-filters-btn")?.addEventListener("click", () => {
+    state.pipelineFilters = {
+      stage: "all",
+      priority: "all",
+      riskLevel: "all",
+      nextAction: "all",
+      interview: "all",
+    };
+    render();
+  });
+  document.querySelectorAll("[data-pipeline-quick-form]").forEach((form) => {
+    form.addEventListener("submit", submitPipelineQuickUpdate);
+  });
   document.querySelector("#global-search-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
@@ -3382,6 +3512,45 @@ async function submitOpportunity(event) {
     showError(error.message);
   } finally {
     state.saving = false;
+    render();
+  }
+}
+
+async function submitPipelineQuickUpdate(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const id = form.dataset.pipelineQuickForm;
+  const opportunity = state.opportunities.find((item) => item.id === id);
+  if (!opportunity || state.quickSavingOpportunityId) return;
+
+  const formData = new FormData(form);
+  const payload = {
+    stage: String(formData.get("stage") || opportunity.stage),
+    priority: String(formData.get("priority") || opportunity.priority),
+    riskLevel: String(formData.get("riskLevel") || opportunity.riskLevel),
+    nextAction: String(formData.get("nextAction") || "").trim(),
+  };
+
+  state.quickSavingOpportunityId = id;
+  state.opportunities = state.opportunities.map((item) => (item.id === id ? { ...item, ...payload } : item));
+  render();
+
+  try {
+    const result = await api(`/api/opportunities/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+    state.opportunities = state.opportunities.map((item) => (item.id === id ? result.opportunity : item));
+    state.selectedId = result.opportunity.id;
+    showToast("Pipeline 已更新");
+  } catch (error) {
+    showError(error.message);
+    const list = await api("/api/opportunities").catch(() => null);
+    if (list?.opportunities) {
+      state.opportunities = list.opportunities;
+    }
+  } finally {
+    state.quickSavingOpportunityId = null;
     render();
   }
 }

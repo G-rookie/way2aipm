@@ -406,6 +406,35 @@ h1 {
   padding: 16px;
 }
 
+.pipeline-controls {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.pipeline-filter-form {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.pipeline-filter-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pipeline-filter-metrics span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .pipeline {
   display: grid;
   grid-template-columns: repeat(5, minmax(180px, 1fr));
@@ -453,15 +482,25 @@ h1 {
 .opp-card {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 12px;
   background: var(--surface);
   text-align: left;
+  overflow: hidden;
 }
 
 .opp-card:hover,
 .opp-card.active {
   border-color: var(--ink);
   box-shadow: 0 10px 26px rgba(36, 31, 24, 0.08);
+}
+
+.opp-card-main {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 12px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
 }
 
 .opp-company {
@@ -474,6 +513,41 @@ h1 {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.4;
+}
+
+.pipeline-quick-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding: 10px;
+  background: rgba(241, 239, 232, 0.46);
+}
+
+.quick-field {
+  display: grid;
+  gap: 5px;
+}
+
+.quick-field.full {
+  grid-column: 1 / -1;
+}
+
+.quick-field label {
+  font-size: 10px;
+}
+
+.quick-field input,
+.quick-field select {
+  min-width: 0;
+  padding: 7px 8px;
+  font-size: 12px;
+}
+
+.btn.compact {
+  grid-column: 1 / -1;
+  padding: 7px 9px;
+  font-size: 12px;
 }
 
 .tag-row {
@@ -1612,6 +1686,7 @@ textarea:focus {
   .dashboard-grid,
   .daily-actions,
   .daily-action-grid,
+  .pipeline-filter-form,
   .pre-interview-layout,
   .training-closure-grid,
   .review-committee-grid,
