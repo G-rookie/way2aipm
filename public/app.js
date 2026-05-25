@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.20";
+const APP_VERSION = "v0.21";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -520,6 +520,11 @@ const EMPTY_AI_ANALYSIS_NOTE = {
   contextSnapshot: "",
   promptDraft: "",
   aiResponse: "",
+  aiProvider: "",
+  aiModel: "",
+  aiRunStatus: "not_run",
+  aiLastRunAt: "",
+  aiError: "",
   candidateSchemaVersion: "",
   structuredResponse: "",
   analysisSummary: "",
@@ -637,6 +642,7 @@ const state = {
   savingPortfolioProfile: false,
   savingPortfolioProject: false,
   savingAiAnalysisNote: false,
+  runningAiDiagnosis: false,
   parsingAiCandidates: false,
   actingAiCandidateId: null,
   savingAiFrontierCard: false,
@@ -3299,6 +3305,7 @@ function attachCommonEvents() {
     render();
   });
   document.querySelector("#generate-ai-context-btn")?.addEventListener("click", generateAiAnalysisContext);
+  document.querySelector("#run-ai-diagnosis-btn")?.addEventListener("click", runAiReviewDiagnosis);
   document.querySelector("#parse-ai-candidates-btn")?.addEventListener("click", parseAiAnalysisCandidates);
   document.querySelectorAll("[data-ai-candidate-action]").forEach((button) => {
     button.addEventListener("click", () => handleAiCandidateAction(button));
@@ -4314,6 +4321,43 @@ async function submitAiAnalysisNote(event) {
     showError(error.message);
   } finally {
     state.savingAiAnalysisNote = false;
+    render();
+  }
+}
+
+async function runAiReviewDiagnosis() {
+  const note = selectedAiAnalysisNote();
+  const form = document.querySelector("#ai-analysis-form");
+  if (!note?.id || !form || state.runningAiDiagnosis) {
+    showInfo("请先保存复盘诊断记录，再调用 AI 生成候选");
+    return;
+  }
+  const payload = formToAiAnalysisNote(form);
+  state.runningAiDiagnosis = true;
+  render();
+  try {
+    await api(`/api/ai-analysis-notes/${encodeURIComponent(note.id)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+    const result = await api(`/api/ai-analysis-notes/${encodeURIComponent(note.id)}/run-ai`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    state.aiAnalysisNotes = state.aiAnalysisNotes.map((item) =>
+      item.id === note.id ? result.aiAnalysisNote : item,
+    );
+    showToast(`AI 候选已生成${result.aiAnalysisNote.aiModel ? `（${result.aiAnalysisNote.aiModel}）` : ""}`);
+  } catch (error) {
+    const refreshed = await api(`/api/ai-analysis-notes/${encodeURIComponent(note.id)}`).catch(() => null);
+    if (refreshed?.aiAnalysisNote) {
+      state.aiAnalysisNotes = state.aiAnalysisNotes.map((item) =>
+        item.id === note.id ? refreshed.aiAnalysisNote : item,
+      );
+    }
+    showError(error.message);
+  } finally {
+    state.runningAiDiagnosis = false;
     render();
   }
 }
@@ -6682,6 +6726,26 @@ function isReviewDiagnosisNote(note) {
   return note.analysisType === "review_diagnosis" && note.sourceType === "interview_review";
 }
 
+function renderAiRunNotice(note, isNew) {
+  if (!isReviewDiagnosisNote(note)) return "";
+  const completed = note.aiRunStatus === "completed";
+  const failed = note.aiRunStatus === "failed";
+  const meta = completed || failed
+    ? `${note.aiModel || "已配置模型"}${note.aiLastRunAt ? ` · ${note.aiLastRunAt}` : ""}`
+    : "保存记录后可调用已配置模型";
+  return `
+    <div class="ai-external-notice ${failed ? "failed" : completed ? "completed" : ""}">
+      <div>
+        <strong>正式 AI 调用</strong>
+        <p>点击调用会将当前复盘上下文发送给已配置的 OpenAI 服务。发送前请检查公司与个人敏感信息。</p>
+      </div>
+      <span class="tag ai-schema">${escapeHtml(meta)}</span>
+      ${failed && note.aiError ? `<p class="ai-run-error">${escapeHtml(note.aiError)}</p>` : ""}
+      ${isNew ? `<p class="ai-run-hint">先保存分析记录，再发起调用。</p>` : ""}
+    </div>
+  `;
+}
+
 function renderAiCandidateWorkspace(note, isNew) {
   if (!isReviewDiagnosisNote(note)) return "";
   const weaknesses = note.weaknessCandidates || [];
@@ -6787,10 +6851,11 @@ function renderAiAnalysisDetail(note) {
       <div class="panel-header">
         <div>
           <h2 class="panel-title">${isNew ? "新增 AI 辅助分析" : "AI 分析详情"}</h2>
-          <p class="panel-subtitle">先生成上下文和提示词，再把外部 AI 输出粘贴回来，最后写下你的判断。</p>
+          <p class="panel-subtitle">可手动粘贴 AI 输出；复盘诊断也可主动调用模型生成候选，采纳前仍由你判断。</p>
         </div>
       </div>
       <div class="panel-body">
+        ${renderAiRunNotice(note, isNew)}
         <form id="ai-analysis-form" class="form-grid compact-form ai-analysis-form">
           <div class="form-field full">
             <label>标题</label>
@@ -6850,6 +6915,7 @@ function renderAiAnalysisDetail(note) {
             <div class="actions">
               ${isNew ? `<button class="btn" id="cancel-ai-analysis-btn" type="button">取消</button>` : ""}
               <button class="btn" id="generate-ai-context-btn" type="button"${disabledAttr(state.generatingAiContext)}>${state.generatingAiContext ? "生成中..." : "生成上下文与提示词"}</button>
+              ${isReviewDiagnosisNote(note) && !isNew ? `<button class="btn primary" id="run-ai-diagnosis-btn" type="button"${disabledAttr(state.runningAiDiagnosis)}>${state.runningAiDiagnosis ? "调用中..." : "调用 AI 生成候选"}</button>` : ""}
               ${isReviewDiagnosisNote(note) ? `<button class="btn" id="parse-ai-candidates-btn" type="button"${disabledAttr(state.parsingAiCandidates)}>${state.parsingAiCandidates ? "解析中..." : "解析结构化候选"}</button>` : ""}
               <button class="btn primary" type="submit"${disabledAttr(state.savingAiAnalysisNote)}>${state.savingAiAnalysisNote ? "保存中..." : "保存分析记录"}</button>
             </div>

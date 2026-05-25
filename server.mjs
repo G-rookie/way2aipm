@@ -6,6 +6,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4173);
+const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const DEFAULT_OPENAI_MODEL = "gpt-5.5";
 const PUBLIC_DIR = path.join(__dirname, "public");
 const CONTENT_DIR = path.join(__dirname, "content");
 const OPPORTUNITIES_DIR = path.join(CONTENT_DIR, "opportunities");
@@ -131,6 +133,7 @@ const AI_ANALYSIS_SOURCE_TYPES = new Set([
   "freeform",
 ]);
 const AI_ANALYSIS_STATUSES = new Set(["draft", "prompt_ready", "ai_responded", "decided", "archived"]);
+const AI_RUN_STATUSES = new Set(["not_run", "completed", "failed"]);
 const AI_FRONTIER_CATEGORIES = new Set([
   "model_capability",
   "ai_product",
@@ -144,6 +147,80 @@ const AI_FRONTIER_CATEGORIES = new Set([
 const AI_FRONTIER_STATUSES = new Set(["inbox", "summarized", "mapped", "applied", "archived"]);
 const RHYTHM_LEVELS = new Set(["low", "medium", "high"]);
 const RHYTHM_STATUSES = new Set(["planned", "active", "recovery_needed", "closed", "archived"]);
+
+const REVIEW_DIAGNOSIS_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+    failurePoints: {
+      type: "array",
+      items: { type: "string" },
+    },
+    weaknessCandidates: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          category: {
+            type: "string",
+            enum: [
+              "project_depth",
+              "product_thinking",
+              "ai_understanding",
+              "business_sense",
+              "communication",
+              "case_analysis",
+              "motivation",
+              "other",
+            ],
+          },
+          severity: { type: "string", enum: ["low", "medium", "high"] },
+          evidence: { type: "string" },
+          description: { type: "string" },
+        },
+        required: ["title", "category", "severity", "evidence", "description"],
+        additionalProperties: false,
+      },
+    },
+    trainingTaskCandidates: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          weaknessCandidateIndex: { type: ["integer", "null"] },
+          taskType: {
+            type: "string",
+            enum: [
+              "answer_rewrite",
+              "mock_interview",
+              "project_deep_dive",
+              "case_practice",
+              "knowledge_patch",
+              "expression_drill",
+              "other",
+            ],
+          },
+          targetAbility: { type: "string" },
+          practiceOutput: { type: "string" },
+          acceptanceCriteria: { type: "string" },
+        },
+        required: [
+          "title",
+          "weaknessCandidateIndex",
+          "taskType",
+          "targetAbility",
+          "practiceOutput",
+          "acceptanceCriteria",
+        ],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["summary", "failurePoints", "weaknessCandidates", "trainingTaskCandidates"],
+  additionalProperties: false,
+};
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -928,6 +1005,9 @@ function normalizeAiAnalysisNote(input, existing = {}) {
   const sourceTitle = String(input.sourceTitle ?? existing.sourceTitle ?? "").trim();
   const title = String(input.title ?? existing.title ?? sourceTitle ?? "").trim();
   const status = AI_ANALYSIS_STATUSES.has(input.status) ? input.status : existing.status || "prompt_ready";
+  const aiRunStatus = AI_RUN_STATUSES.has(input.aiRunStatus)
+    ? input.aiRunStatus
+    : existing.aiRunStatus || "not_run";
 
   if (!title) {
     throw new Error("title is required");
@@ -944,6 +1024,11 @@ function normalizeAiAnalysisNote(input, existing = {}) {
     contextSnapshot: String(input.contextSnapshot ?? existing.contextSnapshot ?? ""),
     promptDraft: String(input.promptDraft ?? existing.promptDraft ?? ""),
     aiResponse: String(input.aiResponse ?? existing.aiResponse ?? ""),
+    aiProvider: String(input.aiProvider ?? existing.aiProvider ?? "").trim(),
+    aiModel: String(input.aiModel ?? existing.aiModel ?? "").trim(),
+    aiRunStatus,
+    aiLastRunAt: String(input.aiLastRunAt ?? existing.aiLastRunAt ?? "").trim(),
+    aiError: String(input.aiError ?? existing.aiError ?? "").trim(),
     candidateSchemaVersion: String(input.candidateSchemaVersion ?? existing.candidateSchemaVersion ?? "").trim(),
     structuredResponse: String(input.structuredResponse ?? existing.structuredResponse ?? ""),
     analysisSummary: String(input.analysisSummary ?? existing.analysisSummary ?? ""),
@@ -3073,6 +3158,123 @@ async function parseAiAnalysisCandidates(note, structuredResponse) {
   return nextNote;
 }
 
+function serviceError(message, statusCode) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function outputTextFromResponse(payload) {
+  if (typeof payload?.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text.trim();
+  }
+
+  for (const item of payload?.output || []) {
+    for (const content of item?.content || []) {
+      if (content?.type === "output_text" && typeof content.text === "string" && content.text.trim()) {
+        return content.text.trim();
+      }
+    }
+  }
+
+  throw serviceError("模型未返回可解析的结构化结果，请稍后重试或使用手动粘贴流程", 502);
+}
+
+async function requestReviewDiagnosisFromOpenAi(promptDraft) {
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) {
+    throw serviceError("尚未配置 OPENAI_API_KEY，请在启动本地服务前设置密钥后重试", 503);
+  }
+  const model = String(process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL).trim() || DEFAULT_OPENAI_MODEL;
+  let response;
+  try {
+    response = await fetch(OPENAI_RESPONSES_URL, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        input: promptDraft,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "review_diagnosis_v1",
+            strict: true,
+            schema: REVIEW_DIAGNOSIS_JSON_SCHEMA,
+          },
+        },
+      }),
+    });
+  } catch {
+    throw serviceError("无法连接模型服务，请检查网络后重试，或继续使用手动粘贴流程", 502);
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = String(payload?.error?.message || "").trim();
+    throw serviceError(
+      `模型服务请求失败（${response.status}）${message ? `：${message}` : ""}`,
+      502,
+    );
+  }
+
+  return { model, structuredResponse: outputTextFromResponse(payload) };
+}
+
+async function runAiReviewDiagnosis(note) {
+  ensureReviewDiagnosisNote(note);
+  const context = await buildAiAnalysisContext(note);
+  const promptDraft = String(note.promptDraft || context.promptDraft).trim();
+  const preparedNote = normalizeAiAnalysisNote(
+    {
+      ...note,
+      sourceTitle: note.sourceTitle || context.sourceTitle,
+      contextSnapshot: note.contextSnapshot || context.contextSnapshot,
+      promptDraft,
+      aiProvider: "openai",
+      aiRunStatus: "not_run",
+      aiError: "",
+    },
+    note,
+  );
+
+  try {
+    const result = await requestReviewDiagnosisFromOpenAi(promptDraft);
+    const completedNote = normalizeAiAnalysisNote(
+      {
+        ...preparedNote,
+        aiResponse: result.structuredResponse,
+        structuredResponse: result.structuredResponse,
+        aiProvider: "openai",
+        aiModel: result.model,
+        aiRunStatus: "completed",
+        aiLastRunAt: new Date().toISOString(),
+        aiError: "",
+      },
+      note,
+    );
+    return await parseAiAnalysisCandidates(completedNote, result.structuredResponse);
+  } catch (error) {
+    if (error.statusCode !== 503) {
+      const failedNote = normalizeAiAnalysisNote(
+        {
+          ...preparedNote,
+          aiProvider: "openai",
+          aiModel: String(process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL).trim() || DEFAULT_OPENAI_MODEL,
+          aiRunStatus: "failed",
+          aiLastRunAt: new Date().toISOString(),
+          aiError: error.message,
+        },
+        note,
+      );
+      await storage.saveAiAnalysisNote(failedNote);
+    }
+    throw error;
+  }
+}
+
 async function actOnAiCandidate(note, input) {
   ensureReviewDiagnosisNote(note);
   const action = String(input.action || "");
@@ -3889,6 +4091,22 @@ async function handleApi(req, res, url) {
         return sendJson(res, 200, await actOnAiCandidate(note, body));
       } catch (error) {
         return sendJson(res, 400, { error: error.message });
+      }
+    }
+    return methodNotAllowed(res);
+  }
+
+  const aiRunMatch = url.pathname.match(/^\/api\/ai-analysis-notes\/([^/]+)\/run-ai$/);
+  if (aiRunMatch) {
+    const id = decodeURIComponent(aiRunMatch[1]);
+    if (req.method === "POST") {
+      const note = await storage.getAiAnalysisNote(id);
+      if (!note) return notFound(res);
+      try {
+        const aiAnalysisNote = await runAiReviewDiagnosis(note);
+        return sendJson(res, 200, { aiAnalysisNote });
+      } catch (error) {
+        return sendJson(res, error.statusCode || 400, { error: error.message });
       }
     }
     return methodNotAllowed(res);
