@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.19";
+const APP_VERSION = "v0.20";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -215,6 +215,7 @@ const PORTFOLIO_READINESS = [
 ];
 
 const AI_ANALYSIS_TYPES = [
+  ["review_diagnosis", "面试复盘诊断"],
   ["jd_breakdown", "JD 拆解"],
   ["company_research", "公司/业务调研"],
   ["project_match", "项目匹配"],
@@ -519,6 +520,12 @@ const EMPTY_AI_ANALYSIS_NOTE = {
   contextSnapshot: "",
   promptDraft: "",
   aiResponse: "",
+  candidateSchemaVersion: "",
+  structuredResponse: "",
+  analysisSummary: "",
+  failurePointCandidates: [],
+  weaknessCandidates: [],
+  trainingTaskCandidates: [],
   humanDecision: "",
   nextAction: "",
   status: "prompt_ready",
@@ -630,6 +637,8 @@ const state = {
   savingPortfolioProfile: false,
   savingPortfolioProject: false,
   savingAiAnalysisNote: false,
+  parsingAiCandidates: false,
+  actingAiCandidateId: null,
   savingAiFrontierCard: false,
   savingRhythmLog: false,
   quickSavingOpportunityId: null,
@@ -1701,6 +1710,25 @@ function beginWeaknessFromSelectedReview() {
     relatedInterviewRoundIds: [review.interviewRoundId],
     relatedReviewIds: [review.id],
   });
+}
+
+function beginAiDiagnosisFromSelectedReview() {
+  const review = selectedReview();
+  if (!review?.id) {
+    showInfo("请先保存一份复盘");
+    return;
+  }
+  state.activeModule = "aiAnalysis";
+  state.aiAnalysisNoteDraft = {
+    ...EMPTY_AI_ANALYSIS_NOTE,
+    analysisType: "review_diagnosis",
+    sourceType: "interview_review",
+    sourceId: review.id,
+    sourceTitle: `${review.companyName} - ${review.roundName}复盘`,
+    title: `${review.companyName} ${review.roundName}复盘诊断`,
+  };
+  state.selectedAiAnalysisNoteId = null;
+  render();
 }
 
 function beginNewOpportunity() {
@@ -3271,6 +3299,10 @@ function attachCommonEvents() {
     render();
   });
   document.querySelector("#generate-ai-context-btn")?.addEventListener("click", generateAiAnalysisContext);
+  document.querySelector("#parse-ai-candidates-btn")?.addEventListener("click", parseAiAnalysisCandidates);
+  document.querySelectorAll("[data-ai-candidate-action]").forEach((button) => {
+    button.addEventListener("click", () => handleAiCandidateAction(button));
+  });
   document.querySelector("#new-ai-frontier-card-btn")?.addEventListener("click", beginNewAiFrontierCard);
   document.querySelectorAll("[data-ai-frontier-card-id]").forEach((button) => {
     button.addEventListener("click", () => selectAiFrontierCard(button.dataset.aiFrontierCardId));
@@ -3303,6 +3335,7 @@ function attachCommonEvents() {
   document.querySelector("#create-brief-btn")?.addEventListener("click", beginBriefForSelectedInterview);
   document.querySelector("#create-review-btn")?.addEventListener("click", beginReviewForSelectedInterview);
   document.querySelector("#create-weakness-from-review-btn")?.addEventListener("click", beginWeaknessFromSelectedReview);
+  document.querySelector("#create-ai-diagnosis-from-review-btn")?.addEventListener("click", beginAiDiagnosisFromSelectedReview);
   document.querySelector("#new-weakness-btn")?.addEventListener("click", () => beginNewWeakness());
   document.querySelectorAll(".new-training-task-btn").forEach((button) => {
     button.addEventListener("click", beginTrainingTaskForSelectedWeakness);
@@ -4204,6 +4237,7 @@ function formToAiAnalysisNote(form) {
     contextSnapshot: formData.get("contextSnapshot"),
     promptDraft: formData.get("promptDraft"),
     aiResponse: formData.get("aiResponse"),
+    structuredResponse: formData.get("structuredResponse"),
     humanDecision: formData.get("humanDecision"),
     nextAction: formData.get("nextAction"),
     status: formData.get("status"),
@@ -4280,6 +4314,74 @@ async function submitAiAnalysisNote(event) {
     showError(error.message);
   } finally {
     state.savingAiAnalysisNote = false;
+    render();
+  }
+}
+
+async function parseAiAnalysisCandidates() {
+  const note = selectedAiAnalysisNote();
+  const form = document.querySelector("#ai-analysis-form");
+  if (!note?.id || !form || state.parsingAiCandidates) {
+    showInfo("请先保存复盘诊断记录，再解析结构化候选");
+    return;
+  }
+  const payload = formToAiAnalysisNote(form);
+  state.parsingAiCandidates = true;
+  render();
+  try {
+    await api(`/api/ai-analysis-notes/${encodeURIComponent(note.id)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+    const result = await api(`/api/ai-analysis-notes/${encodeURIComponent(note.id)}/parse-candidates`, {
+      method: "POST",
+      body: JSON.stringify({ structuredResponse: payload.structuredResponse }),
+    });
+    state.aiAnalysisNotes = state.aiAnalysisNotes.map((item) =>
+      item.id === note.id ? result.aiAnalysisNote : item,
+    );
+    showToast("结构化候选已解析并保存");
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    state.parsingAiCandidates = false;
+    render();
+  }
+}
+
+async function handleAiCandidateAction(button) {
+  const note = selectedAiAnalysisNote();
+  if (!note?.id || state.actingAiCandidateId) return;
+  const candidateId = button.dataset.aiCandidateId;
+  const candidateType = button.dataset.aiCandidateType;
+  const action = button.dataset.aiCandidateAction;
+  state.actingAiCandidateId = candidateId;
+  render();
+  try {
+    const result = await api(`/api/ai-analysis-notes/${encodeURIComponent(note.id)}/candidate-actions`, {
+      method: "POST",
+      body: JSON.stringify({ candidateId, candidateType, action }),
+    });
+    state.aiAnalysisNotes = state.aiAnalysisNotes.map((item) =>
+      item.id === note.id ? result.aiAnalysisNote : item,
+    );
+    if (action === "accept") {
+      const [weaknessList, taskList, reviewList] = await Promise.all([
+        api("/api/weaknesses"),
+        api("/api/training-tasks"),
+        api("/api/interview-reviews"),
+      ]);
+      state.weaknesses = weaknessList.weaknesses || [];
+      state.trainingTasks = taskList.tasks || [];
+      state.reviews = reviewList.reviews || [];
+      showToast(candidateType === "weakness" ? "已采纳为能力缺陷" : "已采纳为训练任务");
+    } else {
+      showToast("候选已忽略");
+    }
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    state.actingAiCandidateId = null;
     render();
   }
 }
@@ -5269,7 +5371,10 @@ function renderReviewForm(interview) {
               <label>关联能力缺陷</label>
               <p class="mini-meta">${(review.linkedWeaknessIds || []).length ? `已关联 ${(review.linkedWeaknessIds || []).length} 个缺陷` : "尚未关联能力缺陷"}</p>
             </div>
-            <button class="btn" id="create-weakness-from-review-btn" type="button">从本轮复盘创建缺陷</button>
+            <div class="actions">
+              <button class="btn" id="create-ai-diagnosis-from-review-btn" type="button">生成 AI 诊断流程</button>
+              <button class="btn" id="create-weakness-from-review-btn" type="button">直接创建缺陷</button>
+            </div>
           </div>
           <div class="form-field full">
             <div class="actions">
@@ -6565,6 +6670,101 @@ function renderAiSourceField(note) {
   `;
 }
 
+function aiCandidateDecisionLabel(decision) {
+  return {
+    pending: "待确认",
+    accepted: "已采纳",
+    ignored: "已忽略",
+  }[decision] || "待确认";
+}
+
+function isReviewDiagnosisNote(note) {
+  return note.analysisType === "review_diagnosis" && note.sourceType === "interview_review";
+}
+
+function renderAiCandidateWorkspace(note, isNew) {
+  if (!isReviewDiagnosisNote(note)) return "";
+  const weaknesses = note.weaknessCandidates || [];
+  const tasks = note.trainingTaskCandidates || [];
+
+  if (isNew) {
+    return `<div class="empty">保存复盘诊断记录后，可以解析结构化候选。</div>`;
+  }
+
+  return `
+    <div class="detail-divider"></div>
+    <section class="ai-candidates">
+      <div class="section-heading">
+        <div>
+          <h3>人工确认区</h3>
+          <p>候选只有在采纳后才会进入缺陷档案或训练计划。</p>
+        </div>
+        <span class="tag ai-schema">${escapeHtml(note.candidateSchemaVersion || "待解析")}</span>
+      </div>
+      ${note.analysisSummary ? `<div class="candidate-summary"><strong>诊断摘要</strong><p>${escapeHtml(note.analysisSummary)}</p></div>` : ""}
+      ${
+        (note.failurePointCandidates || []).length
+          ? `<div class="tag-row">${note.failurePointCandidates.map((item) => `<span class="tag review-category">${escapeHtml(item)}</span>`).join("")}</div>`
+          : ""
+      }
+      <div class="candidate-columns">
+        <div class="candidate-group">
+          <h4>能力缺陷候选</h4>
+          ${
+            weaknesses.length
+              ? weaknesses.map((candidate) => {
+                  const busy = state.actingAiCandidateId === candidate.id;
+                  return `
+                    <article class="candidate-card ${candidate.decision || "pending"}">
+                      <div class="candidate-head">
+                        <strong>${escapeHtml(candidate.title)}</strong>
+                        <span class="tag candidate-${candidate.decision || "pending"}">${aiCandidateDecisionLabel(candidate.decision)}</span>
+                      </div>
+                      <p>${escapeHtml(candidate.description || candidate.evidence || "暂无描述")}</p>
+                      <div class="tag-row">
+                        <span class="tag severity-${candidate.severity}">${optionLabel(SEVERITIES, candidate.severity)}</span>
+                        <span class="tag review-category">${optionLabel(WEAKNESS_CATEGORIES, candidate.category)}</span>
+                      </div>
+                      <div class="actions candidate-actions">
+                        <button class="btn primary" type="button" data-ai-candidate-action="accept" data-ai-candidate-type="weakness" data-ai-candidate-id="${escapeHtml(candidate.id)}"${disabledAttr(busy || candidate.decision === "accepted")}>${candidate.decision === "accepted" ? "已创建缺陷" : "采纳为缺陷"}</button>
+                        <button class="btn" type="button" data-ai-candidate-action="ignore" data-ai-candidate-type="weakness" data-ai-candidate-id="${escapeHtml(candidate.id)}"${disabledAttr(busy || candidate.decision === "accepted")}>忽略</button>
+                      </div>
+                    </article>
+                  `;
+                }).join("")
+              : `<div class="empty compact-empty">暂无缺陷候选。</div>`
+          }
+        </div>
+        <div class="candidate-group">
+          <h4>训练任务候选</h4>
+          ${
+            tasks.length
+              ? tasks.map((candidate) => {
+                  const linkedWeakness = weaknesses.find((item) => item.id === candidate.weaknessCandidateId);
+                  const busy = state.actingAiCandidateId === candidate.id;
+                  return `
+                    <article class="candidate-card ${candidate.decision || "pending"}">
+                      <div class="candidate-head">
+                        <strong>${escapeHtml(candidate.title)}</strong>
+                        <span class="tag candidate-${candidate.decision || "pending"}">${aiCandidateDecisionLabel(candidate.decision)}</span>
+                      </div>
+                      <p>${escapeHtml(candidate.targetAbility || candidate.practiceOutput || "暂无目标能力")}</p>
+                      <p class="mini-meta">关联缺陷：${escapeHtml(linkedWeakness?.title || "未匹配")}</p>
+                      <div class="actions candidate-actions">
+                        <button class="btn primary" type="button" data-ai-candidate-action="accept" data-ai-candidate-type="training_task" data-ai-candidate-id="${escapeHtml(candidate.id)}"${disabledAttr(busy || candidate.decision === "accepted")}>${candidate.decision === "accepted" ? "已创建任务" : "采纳为任务"}</button>
+                        <button class="btn" type="button" data-ai-candidate-action="ignore" data-ai-candidate-type="training_task" data-ai-candidate-id="${escapeHtml(candidate.id)}"${disabledAttr(busy || candidate.decision === "accepted")}>忽略</button>
+                      </div>
+                    </article>
+                  `;
+                }).join("")
+              : `<div class="empty compact-empty">暂无训练候选。</div>`
+          }
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderAiAnalysisDetail(note) {
   const isNew = Boolean(state.aiAnalysisNoteDraft);
 
@@ -6628,6 +6828,16 @@ function renderAiAnalysisDetail(note) {
             <label>AI 输出</label>
             <textarea name="aiResponse" class="tall-textarea" placeholder="把外部 AI 的回答粘贴到这里。">${escapeHtml(note.aiResponse)}</textarea>
           </div>
+          ${
+            isReviewDiagnosisNote(note)
+              ? `
+                <div class="form-field full">
+                  <label>结构化 AI 输出（JSON）</label>
+                  <textarea name="structuredResponse" class="tall-textarea" placeholder="粘贴符合复盘诊断 schema 的 JSON。">${escapeHtml(note.structuredResponse)}</textarea>
+                </div>
+              `
+              : `<input name="structuredResponse" type="hidden" value="${escapeHtml(note.structuredResponse)}" />`
+          }
           <div class="form-field full">
             <label>人工决策</label>
             <textarea name="humanDecision" placeholder="记录你采纳什么、否决什么、下一步怎么做。">${escapeHtml(note.humanDecision)}</textarea>
@@ -6640,11 +6850,13 @@ function renderAiAnalysisDetail(note) {
             <div class="actions">
               ${isNew ? `<button class="btn" id="cancel-ai-analysis-btn" type="button">取消</button>` : ""}
               <button class="btn" id="generate-ai-context-btn" type="button"${disabledAttr(state.generatingAiContext)}>${state.generatingAiContext ? "生成中..." : "生成上下文与提示词"}</button>
+              ${isReviewDiagnosisNote(note) ? `<button class="btn" id="parse-ai-candidates-btn" type="button"${disabledAttr(state.parsingAiCandidates)}>${state.parsingAiCandidates ? "解析中..." : "解析结构化候选"}</button>` : ""}
               <button class="btn primary" type="submit"${disabledAttr(state.savingAiAnalysisNote)}>${state.savingAiAnalysisNote ? "保存中..." : "保存分析记录"}</button>
             </div>
             <div class="status-line">${note.updatedAt ? `上次更新：${escapeHtml(note.updatedAt)}` : "保存后会写入 content/ai-analysis-notes。"}</div>
           </div>
         </form>
+        ${renderAiCandidateWorkspace(note, isNew)}
       </div>
     </section>
   `;

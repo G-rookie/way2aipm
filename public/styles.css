@@ -855,6 +855,22 @@ h1 {
   color: var(--green);
 }
 
+.tag.ai-schema,
+.tag.candidate-pending {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.tag.candidate-accepted {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.tag.candidate-ignored {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
 .tag.frontier-inbox {
   background: var(--yellow-bg);
   color: var(--yellow);
@@ -1349,6 +1365,80 @@ textarea:focus {
   min-height: 154px;
 }
 
+.ai-candidates {
+  display: grid;
+  gap: 12px;
+}
+
+.candidate-summary {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--surface-2);
+}
+
+.candidate-summary p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.candidate-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.candidate-group {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.candidate-group h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.candidate-card {
+  display: grid;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--surface);
+}
+
+.candidate-card.accepted {
+  border-color: rgba(22, 101, 52, 0.24);
+}
+
+.candidate-card.ignored {
+  opacity: 0.72;
+}
+
+.candidate-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.candidate-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.candidate-actions {
+  justify-content: flex-start;
+}
+
+.compact-empty {
+  padding: 16px;
+}
+
 .page-actions {
   justify-content: flex-end;
   margin: 0 0 14px;
@@ -1687,6 +1777,7 @@ textarea:focus {
   .daily-actions,
   .daily-action-grid,
   .pipeline-filter-form,
+  .candidate-columns,
   .pre-interview-layout,
   .training-closure-grid,
   .review-committee-grid,

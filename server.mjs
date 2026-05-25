@@ -110,6 +110,7 @@ const PORTFOLIO_STATUSES = new Set(["draft", "reviewing", "ready", "published_re
 const PORTFOLIO_VISIBILITIES = new Set(["private", "portfolio", "hidden"]);
 const PORTFOLIO_READINESS = new Set(["draft", "needs_sanitizing", "needs_evidence", "ready"]);
 const AI_ANALYSIS_TYPES = new Set([
+  "review_diagnosis",
   "jd_breakdown",
   "company_research",
   "project_match",
@@ -943,6 +944,18 @@ function normalizeAiAnalysisNote(input, existing = {}) {
     contextSnapshot: String(input.contextSnapshot ?? existing.contextSnapshot ?? ""),
     promptDraft: String(input.promptDraft ?? existing.promptDraft ?? ""),
     aiResponse: String(input.aiResponse ?? existing.aiResponse ?? ""),
+    candidateSchemaVersion: String(input.candidateSchemaVersion ?? existing.candidateSchemaVersion ?? "").trim(),
+    structuredResponse: String(input.structuredResponse ?? existing.structuredResponse ?? ""),
+    analysisSummary: String(input.analysisSummary ?? existing.analysisSummary ?? ""),
+    failurePointCandidates: Array.isArray(input.failurePointCandidates)
+      ? input.failurePointCandidates
+      : existing.failurePointCandidates || [],
+    weaknessCandidates: Array.isArray(input.weaknessCandidates)
+      ? input.weaknessCandidates
+      : existing.weaknessCandidates || [],
+    trainingTaskCandidates: Array.isArray(input.trainingTaskCandidates)
+      ? input.trainingTaskCandidates
+      : existing.trainingTaskCandidates || [],
     humanDecision: String(input.humanDecision ?? existing.humanDecision ?? ""),
     nextAction: String(input.nextAction ?? existing.nextAction ?? "").trim(),
     status,
@@ -1127,7 +1140,7 @@ function aiAnalysisNoteToMarkdown(note) {
   const frontMatter = JSON.stringify(note, null, 2);
   const title = markdownEscapeTitle(note.title);
 
-  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 上下文快照\n\n${note.contextSnapshot}\n\n## 提示词草稿\n\n${note.promptDraft}\n\n## AI 输出\n\n${note.aiResponse}\n\n## 人工决策\n\n${note.humanDecision}\n\n## 下一步动作\n\n${note.nextAction}\n`;
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 上下文快照\n\n${note.contextSnapshot}\n\n## 提示词草稿\n\n${note.promptDraft}\n\n## AI 输出\n\n${note.aiResponse}\n\n## 结构化 AI 输出\n\n${note.structuredResponse}\n\n## 人工决策\n\n${note.humanDecision}\n\n## 下一步动作\n\n${note.nextAction}\n`;
 }
 
 function aiFrontierCardToMarkdown(card) {
@@ -2747,6 +2760,7 @@ function compactBlock(title, entries) {
 
 function analysisTypeLabel(type) {
   const labels = {
+    review_diagnosis: "面试复盘诊断",
     jd_breakdown: "JD 拆解",
     company_research: "公司/业务调研",
     project_match: "项目匹配",
@@ -2892,8 +2906,50 @@ async function sourceContext(sourceType, sourceId, freeformContext = "") {
   throw new Error("Unsupported analysis source type");
 }
 
-function buildPromptDraft({ analysisType, sourceTitle, contextSnapshot }) {
+function reviewDiagnosisSchemaInstruction() {
+  return `
+
+本次需要返回可供系统解析的 JSON。只输出 JSON，不要使用 Markdown 代码块，结构如下：
+{
+  "summary": "本次面试整体诊断",
+  "failurePoints": ["具体挂点"],
+  "weaknessCandidates": [
+    {
+      "title": "缺陷标题",
+      "category": "project_depth | product_thinking | ai_understanding | business_sense | communication | case_analysis | motivation | other",
+      "severity": "low | medium | high",
+      "evidence": "来自复盘的事实依据",
+      "description": "缺陷解释"
+    }
+  ],
+  "trainingTaskCandidates": [
+    {
+      "title": "训练任务标题",
+      "weaknessCandidateIndex": 0,
+      "taskType": "answer_rewrite | mock_interview | project_deep_dive | case_practice | knowledge_patch | expression_drill | other",
+      "targetAbility": "目标能力",
+      "practiceOutput": "练习产物",
+      "acceptanceCriteria": "验收标准"
+    }
+  ]
+}
+
+候选只作为建议，最终是否写入系统将由用户人工确认。`;
+}
+
+function buildPromptDraft({ analysisType, sourceType, sourceTitle, contextSnapshot }) {
   const label = analysisTypeLabel(analysisType);
+  const isReviewDiagnosis = analysisType === "review_diagnosis" && sourceType === "interview_review";
+  const outputInstruction = isReviewDiagnosis
+    ? reviewDiagnosisSchemaInstruction()
+    : `
+
+请按以下格式输出：
+1. 关键信息摘要
+2. 主要机会点
+3. 主要风险点
+4. 建议我追问或补充的信息
+5. 可执行的下一步建议`;
   return `你是一名严谨的 AI 产品经理面试与作品集顾问。请基于以下上下文，完成「${label}」。
 
 限制条件：
@@ -2905,14 +2961,7 @@ function buildPromptDraft({ analysisType, sourceTitle, contextSnapshot }) {
 上下文：
 ${contextSnapshot}
 
-请按以下格式输出：
-1. 关键信息摘要
-2. 主要机会点
-3. 主要风险点
-4. 建议我追问或补充的信息
-5. 可执行的下一步建议
-
-分析对象：${sourceTitle || "未命名对象"}`;
+分析对象：${sourceTitle || "未命名对象"}${outputInstruction}`;
 }
 
 async function buildAiAnalysisContext(input = {}) {
@@ -2926,8 +2975,192 @@ async function buildAiAnalysisContext(input = {}) {
   return {
     sourceTitle,
     contextSnapshot,
-    promptDraft: buildPromptDraft({ analysisType, sourceTitle, contextSnapshot }),
+    promptDraft: buildPromptDraft({ analysisType, sourceType, sourceTitle, contextSnapshot }),
   };
+}
+
+function ensureReviewDiagnosisNote(note) {
+  if (note.analysisType !== "review_diagnosis" || note.sourceType !== "interview_review" || !note.sourceId) {
+    throw new Error("Structured candidates require a review diagnosis linked to an interview review");
+  }
+}
+
+function candidateDecision(existing) {
+  return ["pending", "accepted", "ignored"].includes(existing?.decision) ? existing.decision : "pending";
+}
+
+function parseReviewDiagnosisCandidates(note, structuredResponse) {
+  ensureReviewDiagnosisNote(note);
+  let result;
+  try {
+    result = JSON.parse(String(structuredResponse || "").trim());
+  } catch {
+    throw new Error("结构化 AI 输出必须是有效 JSON");
+  }
+
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error("结构化 AI 输出必须是 JSON 对象");
+  }
+
+  const existingWeaknesses = new Map((note.weaknessCandidates || []).map((item) => [item.id, item]));
+  const existingTasks = new Map((note.trainingTaskCandidates || []).map((item) => [item.id, item]));
+  const weaknessCandidates = (Array.isArray(result.weaknessCandidates) ? result.weaknessCandidates : [])
+    .map((candidate, index) => {
+      const title = String(candidate?.title || "").trim();
+      if (!title) return null;
+      const id = `weakness_candidate_${index + 1}`;
+      const existing = existingWeaknesses.get(id);
+      return {
+        id,
+        title,
+        category: WEAKNESS_CATEGORIES.has(candidate.category) ? candidate.category : "other",
+        severity: SEVERITIES.has(candidate.severity) ? candidate.severity : "medium",
+        evidence: String(candidate.evidence || "").trim(),
+        description: String(candidate.description || "").trim(),
+        decision: candidateDecision(existing),
+        createdWeaknessId: String(existing?.createdWeaknessId || ""),
+      };
+    })
+    .filter(Boolean);
+  const trainingTaskCandidates = (Array.isArray(result.trainingTaskCandidates) ? result.trainingTaskCandidates : [])
+    .map((candidate, index) => {
+      const title = String(candidate?.title || "").trim();
+      if (!title) return null;
+      const id = `training_candidate_${index + 1}`;
+      const hasWeaknessIndex = candidate.weaknessCandidateIndex !== null && candidate.weaknessCandidateIndex !== undefined;
+      const weaknessIndex = Number(candidate.weaknessCandidateIndex);
+      const weaknessCandidateId = hasWeaknessIndex && Number.isInteger(weaknessIndex) && weaknessCandidates[weaknessIndex]
+        ? weaknessCandidates[weaknessIndex].id
+        : "";
+      const existing = existingTasks.get(id);
+      return {
+        id,
+        title,
+        weaknessCandidateId,
+        taskType: TRAINING_TASK_TYPES.has(candidate.taskType) ? candidate.taskType : "other",
+        targetAbility: String(candidate.targetAbility || "").trim(),
+        practiceOutput: String(candidate.practiceOutput || "").trim(),
+        acceptanceCriteria: String(candidate.acceptanceCriteria || "").trim(),
+        decision: candidateDecision(existing),
+        createdTrainingTaskId: String(existing?.createdTrainingTaskId || ""),
+      };
+    })
+    .filter(Boolean);
+
+  if (!weaknessCandidates.length && !trainingTaskCandidates.length) {
+    throw new Error("结构化 AI 输出没有可解析的缺陷或训练候选");
+  }
+
+  return {
+    candidateSchemaVersion: "review_diagnosis_v1",
+    structuredResponse: String(structuredResponse || ""),
+    analysisSummary: String(result.summary || "").trim(),
+    failurePointCandidates: Array.isArray(result.failurePoints)
+      ? result.failurePoints.map((item) => String(item || "").trim()).filter(Boolean)
+      : [],
+    weaknessCandidates,
+    trainingTaskCandidates,
+  };
+}
+
+async function parseAiAnalysisCandidates(note, structuredResponse) {
+  const parsed = parseReviewDiagnosisCandidates(note, structuredResponse);
+  const nextNote = normalizeAiAnalysisNote(
+    { ...note, ...parsed, status: "ai_responded" },
+    note,
+  );
+  await storage.saveAiAnalysisNote(nextNote);
+  return nextNote;
+}
+
+async function actOnAiCandidate(note, input) {
+  ensureReviewDiagnosisNote(note);
+  const action = String(input.action || "");
+  const candidateType = String(input.candidateType || "");
+  const candidateId = String(input.candidateId || "");
+  if (!["accept", "ignore"].includes(action)) {
+    throw new Error("Unsupported candidate action");
+  }
+
+  if (candidateType === "weakness") {
+    const candidates = [...(note.weaknessCandidates || [])];
+    const index = candidates.findIndex((candidate) => candidate.id === candidateId);
+    if (index < 0) throw new Error("Weakness candidate not found");
+    const candidate = candidates[index];
+    let weakness = null;
+    if (action === "accept") {
+      if (candidate.decision === "accepted" && candidate.createdWeaknessId) {
+        weakness = await storage.getWeakness(candidate.createdWeaknessId);
+      }
+      if (!weakness) {
+        const review = await storage.getReview(note.sourceId);
+        if (!review) throw new Error("Related interview review not found");
+        weakness = normalizeWeakness({
+          title: candidate.title,
+          category: candidate.category,
+          severity: candidate.severity,
+          evidence: candidate.evidence,
+          description: candidate.description,
+          status: "open",
+          relatedOpportunityIds: [review.opportunityId],
+          relatedInterviewRoundIds: [review.interviewRoundId],
+          relatedReviewIds: [review.id],
+        });
+        await storage.saveWeakness(weakness);
+        await linkWeaknessToReviews(weakness);
+      }
+      candidates[index] = { ...candidate, decision: "accepted", createdWeaknessId: weakness.id };
+    } else {
+      candidates[index] = { ...candidate, decision: "ignored" };
+    }
+    const nextNote = normalizeAiAnalysisNote({ ...note, weaknessCandidates: candidates }, note);
+    await storage.saveAiAnalysisNote(nextNote);
+    return { aiAnalysisNote: nextNote, weakness };
+  }
+
+  if (candidateType === "training_task") {
+    const candidates = [...(note.trainingTaskCandidates || [])];
+    const index = candidates.findIndex((candidate) => candidate.id === candidateId);
+    if (index < 0) throw new Error("Training candidate not found");
+    const candidate = candidates[index];
+    let task = null;
+    let weakness = null;
+    if (action === "accept") {
+      const weaknessCandidate = (note.weaknessCandidates || []).find(
+        (item) => item.id === candidate.weaknessCandidateId,
+      );
+      if (!weaknessCandidate?.createdWeaknessId || weaknessCandidate.decision !== "accepted") {
+        throw new Error("请先采纳关联的能力缺陷候选");
+      }
+      weakness = await storage.getWeakness(weaknessCandidate.createdWeaknessId);
+      if (!weakness) throw new Error("Related weakness not found");
+      if (candidate.decision === "accepted" && candidate.createdTrainingTaskId) {
+        task = await storage.getTrainingTask(candidate.createdTrainingTaskId);
+      }
+      if (!task) {
+        task = normalizeTrainingTask({
+          weaknessId: weakness.id,
+          title: candidate.title,
+          taskType: candidate.taskType,
+          targetAbility: candidate.targetAbility,
+          practiceOutput: candidate.practiceOutput,
+          acceptanceCriteria: candidate.acceptanceCriteria,
+          status: "todo",
+          relatedReviewId: note.sourceId,
+        }, {}, weakness);
+        await storage.saveTrainingTask(task);
+        weakness = await linkTaskToWeakness(task);
+      }
+      candidates[index] = { ...candidate, decision: "accepted", createdTrainingTaskId: task.id };
+    } else {
+      candidates[index] = { ...candidate, decision: "ignored" };
+    }
+    const nextNote = normalizeAiAnalysisNote({ ...note, trainingTaskCandidates: candidates }, note);
+    await storage.saveAiAnalysisNote(nextNote);
+    return { aiAnalysisNote: nextNote, task, weakness };
+  }
+
+  throw new Error("Unsupported candidate type");
 }
 
 async function readRequestBody(req) {
@@ -3625,6 +3858,39 @@ async function handleApi(req, res, url) {
       return sendJson(res, 201, { aiAnalysisNote: note });
     }
 
+    return methodNotAllowed(res);
+  }
+
+  const aiCandidateParseMatch = url.pathname.match(/^\/api\/ai-analysis-notes\/([^/]+)\/parse-candidates$/);
+  if (aiCandidateParseMatch) {
+    const id = decodeURIComponent(aiCandidateParseMatch[1]);
+    if (req.method === "POST") {
+      const note = await storage.getAiAnalysisNote(id);
+      if (!note) return notFound(res);
+      const body = await readRequestBody(req);
+      try {
+        const aiAnalysisNote = await parseAiAnalysisCandidates(note, body.structuredResponse);
+        return sendJson(res, 200, { aiAnalysisNote });
+      } catch (error) {
+        return sendJson(res, 400, { error: error.message });
+      }
+    }
+    return methodNotAllowed(res);
+  }
+
+  const aiCandidateActionMatch = url.pathname.match(/^\/api\/ai-analysis-notes\/([^/]+)\/candidate-actions$/);
+  if (aiCandidateActionMatch) {
+    const id = decodeURIComponent(aiCandidateActionMatch[1]);
+    if (req.method === "POST") {
+      const note = await storage.getAiAnalysisNote(id);
+      if (!note) return notFound(res);
+      const body = await readRequestBody(req);
+      try {
+        return sendJson(res, 200, await actOnAiCandidate(note, body));
+      } catch (error) {
+        return sendJson(res, 400, { error: error.message });
+      }
+    }
     return methodNotAllowed(res);
   }
 
