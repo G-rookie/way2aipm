@@ -79,17 +79,10 @@ node server.mjs
 http://localhost:4173
 ```
 
-如果需要换端口：
+如果需要换端口，可在本地 `.env.local` 中增加配置后重启服务：
 
-```bash
-PORT=4300 node server.mjs
-```
-
-在 PowerShell 中可以使用：
-
-```powershell
-$env:PORT=4300
-node server.mjs
+```dotenv
+PORT=4300
 ```
 
 开发时修改代码后，需要停止当前服务并重新运行：
@@ -102,15 +95,14 @@ node server.mjs
 
 ## AI 配置
 
-面试复盘诊断的正式 AI 调用只在本地 Node 服务端读取密钥。在 PowerShell 中启动前设置：
+面试复盘诊断的正式 AI 调用只在本地 Node 服务端读取配置。项目根目录提供了 [.env.example](.env.example) 模板，实际配置请放在 `.env.local`；该文件已被 Git 忽略，不会提交到远程仓库。
 
-```powershell
-$env:OPENAI_API_KEY="你的 API Key"
-$env:OPENAI_MODEL="gpt-5.5"
-node server.mjs
+```dotenv
+OPENAI_API_KEY=你的_API_Key
+OPENAI_MODEL=你要使用的模型_ID
 ```
 
-`OPENAI_MODEL` 可省略，默认使用 `gpt-5.5`。调用前请在页面中检查上下文是否包含不希望发送到模型服务的敏感信息；API Key 不会写入 Markdown 或发送到浏览器。
+服务执行 `node server.mjs` 时会自动加载 `.env.local`。具体模型由本地配置决定；模型切换只需修改 `OPENAI_MODEL` 并重启服务，不需要每次在 PowerShell 中输入配置。调用前请在页面中检查上下文是否包含不希望发送到模型服务的敏感信息；API Key 不会写入 Markdown 或发送到浏览器。
 
 ## 数据存储
 

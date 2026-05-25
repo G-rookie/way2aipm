@@ -2,12 +2,22 @@ import { createServer } from "node:http";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import path from "node:path";
+import { loadEnvFile } from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const LOCAL_ENV_PATH = path.join(__dirname, ".env.local");
+
+try {
+  loadEnvFile(LOCAL_ENV_PATH);
+} catch (error) {
+  if (error.code !== "ENOENT") {
+    throw error;
+  }
+}
+
 const PORT = Number(process.env.PORT || 4173);
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-const DEFAULT_OPENAI_MODEL = "gpt-5.5";
 const PUBLIC_DIR = path.join(__dirname, "public");
 const CONTENT_DIR = path.join(__dirname, "content");
 const OPPORTUNITIES_DIR = path.join(CONTENT_DIR, "opportunities");
@@ -3182,10 +3192,10 @@ function outputTextFromResponse(payload) {
 
 async function requestReviewDiagnosisFromOpenAi(promptDraft) {
   const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
-  if (!apiKey) {
-    throw serviceError("尚未配置 OPENAI_API_KEY，请在启动本地服务前设置密钥后重试", 503);
+  const model = String(process.env.OPENAI_MODEL || "").trim();
+  if (!apiKey || !model) {
+    throw serviceError("AI 配置不完整，请在 .env.local 中填写 OPENAI_API_KEY 与 OPENAI_MODEL 后重启服务", 503);
   }
-  const model = String(process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL).trim() || DEFAULT_OPENAI_MODEL;
   let response;
   try {
     response = await fetch(OPENAI_RESPONSES_URL, {
@@ -3262,7 +3272,7 @@ async function runAiReviewDiagnosis(note) {
         {
           ...preparedNote,
           aiProvider: "openai",
-          aiModel: String(process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL).trim() || DEFAULT_OPENAI_MODEL,
+          aiModel: String(process.env.OPENAI_MODEL || "").trim(),
           aiRunStatus: "failed",
           aiLastRunAt: new Date().toISOString(),
           aiError: error.message,
@@ -4224,7 +4234,7 @@ function logStartupError(error, port) {
   if (isPortUnavailable(error)) {
     console.error(`way2AIPM OS 启动失败：端口 ${port} 已被占用或当前用户无权监听该端口。`);
     console.error("请先停止正在运行的旧服务，然后重新执行：node server.mjs");
-    console.error(`也可以临时指定其他端口启动：$env:PORT=4300; node server.mjs`);
+    console.error("也可以在 .env.local 中配置 PORT=4300 后重新启动服务。");
     return;
   }
 
