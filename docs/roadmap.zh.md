@@ -32,12 +32,12 @@
 | 后端规则起步 | `v0.19` | Markdown 存储适配雏形、后端规则快照、服务端总控调度 |
 | AI 人工闭环 | `v0.20` | 面试复盘分析 schema、结构化候选解析、人工采纳或忽略 |
 | 正式 AI 起步 | `v0.21` | Responses API 复盘诊断调用、结构化候选生成、调用留痕与人工确认 |
+| Workflow Foundation | `v0.22` | WorkflowRun、面试后修复闭环、总控流程状态、人工审批边界 |
 
 ## 后续路线
 
 | 版本 | 优先级 | 主题 | 主要交付 |
 | --- | --- | --- | --- |
-| `v0.22` | P0 | Workflow Foundation | `WorkflowRun`；面试后修复闭环；总控流程状态；人工审批边界 |
 | `v0.23` | P0 | Runtime 与 Agent Tool Layer | 事件推进、受控读/建议工具、状态同步、流程测试与导出 |
 | `v0.24` | P1 | LangGraph 试点 | 将已验证闭环映射到 graph、interrupt 与 checkpoint；评估 SQLite saver |
 | `v0.25` | P1 | 面试前 Agent Workflow | JD 拆解、隐含要求、问题预测、项目匹配与 Brief 建议 |
@@ -75,4 +75,4 @@ AI 的推进已经从单点调用进入流程编排阶段。后续顺序调整�
 
 ## 当前下一步
 
-`v0.22`：实现 Workflow Foundation，以面试后修复闭环为第一条可追踪流程；暂不继续铺开新的 AI 场景。
+`v0.23`：在已验证的面试后修复流程之上，实现受控 Runtime 与 Agent Tool Layer；暂不扩大自动写入权限。

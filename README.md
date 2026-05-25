@@ -2,7 +2,7 @@
 
 一个面向 AI PM 求职与成长的本地 Markdown 工作台。
 
-## 当前版本：v0.21
+## 当前版本：v0.22
 
 当前版本已经覆盖：
 
@@ -29,6 +29,9 @@
 - AI 辅助分析工作台
 - AI 结构化候选与人工确认
 - AI 面试复盘正式模型调用
+- WorkflowRun 修复流程与阶段追踪
+- 复盘到诊断、训练、验证的受控闭环
+- 流程人工暂停、恢复与完成确认
 - AI 前沿思维框架
 - 个人节奏运营官
 - 总控调度队列
@@ -39,10 +42,10 @@
 - 总控台闭环待办与状态联动
 - Markdown 文件存储
 
-暂不实现登录、云同步、公开发布、删除能力和自动采纳 AI 建议。v0.21 支持由用户主动触发面试复盘诊断模型调用，候选只有经采纳后才会写入缺陷或训练 Markdown。
+暂不实现登录、云同步、公开发布、删除能力和自动采纳 AI 建议。v0.22 支持从已保存复盘启动修复流程；AI 候选只有经人工采纳后才会写入缺陷或训练 Markdown，流程关闭也由用户确认。
 
 项目后续路线见 [Roadmap](docs/roadmap.zh.md)。
-Agent 与 Workflow 架构决策见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，下一实现版本范围见 [v0.22 产品规格](docs/v0.22-product-spec.zh.md)。
+Agent 与 Workflow 架构决策见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，已交付范围见 [v0.22 产品规格](docs/v0.22-product-spec.zh.md)。
 
 ## 版本状态
 
@@ -67,6 +70,7 @@ Agent 与 Workflow 架构决策见 [Agent + Workflow Architecture](docs/agent-wo
 - `v0.19`：后端规则快照、总控调度服务端计算、Markdown 存储适配雏形
 - `v0.20`：复盘诊断 schema、结构化 AI 候选解析、缺陷/训练人工采纳流程
 - `v0.21`：Responses API 面试复盘诊断、正式模型调用、候选人工确认与调用留痕
+- `v0.22`：WorkflowRun、面试后修复闭环、总控流程状态、人工审批边界与流程控制
 
 ## 启动
 

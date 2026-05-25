@@ -35,6 +35,7 @@ const PORTFOLIO_PROJECTS_DIR = path.join(CONTENT_DIR, "portfolio-projects");
 const AI_ANALYSIS_NOTES_DIR = path.join(CONTENT_DIR, "ai-analysis-notes");
 const AI_FRONTIER_CARDS_DIR = path.join(CONTENT_DIR, "ai-frontier-cards");
 const RHYTHM_LOGS_DIR = path.join(CONTENT_DIR, "rhythm-logs");
+const WORKFLOW_RUNS_DIR = path.join(CONTENT_DIR, "workflow-runs");
 const PORTFOLIO_PROFILE_ID = "portfolio_profile";
 
 const STAGES = new Set([
@@ -157,6 +158,17 @@ const AI_FRONTIER_CATEGORIES = new Set([
 const AI_FRONTIER_STATUSES = new Set(["inbox", "summarized", "mapped", "applied", "archived"]);
 const RHYTHM_LEVELS = new Set(["low", "medium", "high"]);
 const RHYTHM_STATUSES = new Set(["planned", "active", "recovery_needed", "closed", "archived"]);
+const WORKFLOW_DEFINITIONS = new Set(["post_interview_repair_loop"]);
+const WORKFLOW_STATUSES = new Set([
+  "diagnosis_pending",
+  "candidate_confirmation",
+  "training_pending",
+  "training_in_progress",
+  "validation_pending",
+  "completed",
+  "paused",
+]);
+const WORKFLOW_WAITING_FOR = new Set(["human_action", "ai_generation", "training", "validation", "none"]);
 
 const REVIEW_DIAGNOSIS_JSON_SCHEMA = {
   type: "object",
@@ -279,6 +291,7 @@ async function ensureContentDirs() {
   await mkdir(AI_ANALYSIS_NOTES_DIR, { recursive: true });
   await mkdir(AI_FRONTIER_CARDS_DIR, { recursive: true });
   await mkdir(RHYTHM_LOGS_DIR, { recursive: true });
+  await mkdir(WORKFLOW_RUNS_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -388,6 +401,13 @@ function createRhythmLogId(title, date) {
   return `rhythm_${stamp}_${seed}_${random}`;
 }
 
+function createWorkflowRunId(title) {
+  const seed = slugify(title);
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `flow_${stamp}_${seed}_${random}`;
+}
+
 function sanitizeId(id, prefix) {
   const value = String(id || "");
   const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
@@ -483,6 +503,12 @@ function rhythmLogPath(id) {
   const safeId = sanitizeId(id, "rhythm");
   if (!safeId) return null;
   return path.join(RHYTHM_LOGS_DIR, `${safeId}.md`);
+}
+
+function workflowRunPath(id) {
+  const safeId = sanitizeId(id, "flow");
+  if (!safeId) return null;
+  return path.join(WORKFLOW_RUNS_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -1031,6 +1057,7 @@ function normalizeAiAnalysisNote(input, existing = {}) {
     sourceId,
     sourceTitle,
     title,
+    workflowRunId: String(input.workflowRunId ?? existing.workflowRunId ?? "").trim(),
     contextSnapshot: String(input.contextSnapshot ?? existing.contextSnapshot ?? ""),
     promptDraft: String(input.promptDraft ?? existing.promptDraft ?? ""),
     aiResponse: String(input.aiResponse ?? existing.aiResponse ?? ""),
@@ -1054,6 +1081,51 @@ function normalizeAiAnalysisNote(input, existing = {}) {
     humanDecision: String(input.humanDecision ?? existing.humanDecision ?? ""),
     nextAction: String(input.nextAction ?? existing.nextAction ?? "").trim(),
     status,
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+function normalizeWorkflowRun(input, existing = {}, review = {}) {
+  const now = new Date().toISOString();
+  const reviewId = String(input.reviewId ?? existing.reviewId ?? review.id ?? "").trim();
+  const opportunityId = String(input.opportunityId ?? existing.opportunityId ?? review.opportunityId ?? "").trim();
+  const interviewRoundId = String(
+    input.interviewRoundId ?? existing.interviewRoundId ?? review.interviewRoundId ?? "",
+  ).trim();
+  const definitionKey = WORKFLOW_DEFINITIONS.has(input.definitionKey)
+    ? input.definitionKey
+    : existing.definitionKey || "post_interview_repair_loop";
+  const title = String(
+    input.title ?? existing.title ?? `${review.companyName || "面试"} - ${review.roundName || "复盘"}修复闭环`,
+  ).trim();
+  const status = WORKFLOW_STATUSES.has(input.status)
+    ? input.status
+    : existing.status || "diagnosis_pending";
+  const waitingFor = WORKFLOW_WAITING_FOR.has(input.waitingFor)
+    ? input.waitingFor
+    : existing.waitingFor || "ai_generation";
+
+  if (!reviewId) throw new Error("reviewId is required");
+  if (!opportunityId) throw new Error("opportunityId is required");
+  if (!interviewRoundId) throw new Error("interviewRoundId is required");
+
+  return {
+    id: existing.id || input.id || createWorkflowRunId(title),
+    type: "workflowRun",
+    definitionKey,
+    title,
+    status,
+    opportunityId,
+    interviewRoundId,
+    reviewId,
+    aiAnalysisNoteId: String(input.aiAnalysisNoteId ?? existing.aiAnalysisNoteId ?? "").trim(),
+    weaknessIds: unique(asArray(input.weaknessIds, existing.weaknessIds || [])),
+    trainingTaskIds: unique(asArray(input.trainingTaskIds, existing.trainingTaskIds || [])),
+    currentStep: String(input.currentStep ?? existing.currentStep ?? "generate_diagnosis").trim(),
+    waitingFor,
+    events: Array.isArray(input.events) ? input.events : existing.events || [],
+    summary: String(input.summary ?? existing.summary ?? ""),
     createdAt: existing.createdAt || input.createdAt || now,
     updatedAt: now,
   };
@@ -1252,6 +1324,16 @@ function rhythmLogToMarkdown(log) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 当天重点\n\n${log.plannedFocus}\n\n## 恢复动作\n\n${log.recoveryAction}\n\n## 下一步调整\n\n${log.nextAdjustment}\n\n## 备注\n\n${log.notes}\n`;
 }
 
+function workflowRunToMarkdown(run) {
+  const frontMatter = JSON.stringify(run, null, 2);
+  const title = markdownEscapeTitle(run.title);
+  const timeline = (run.events || [])
+    .map((event) => `- ${event.at || ""} | ${event.type}${event.note ? ` | ${event.note}` : ""}`)
+    .join("\n") || "- 暂无事件";
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 当前状态\n\n${run.status} / ${run.currentStep}\n\n## 时间线\n\n${timeline}\n\n## 闭环总结\n\n${run.summary}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -1346,6 +1428,12 @@ async function readAiFrontierCardFile(filePath) {
 }
 
 async function readRhythmLogFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readWorkflowRunFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -1938,6 +2026,42 @@ async function listRhythmLogs(filters = {}) {
   return filtered;
 }
 
+async function listWorkflowRuns(filters = {}) {
+  await ensureContentDirs();
+  const entries = await readdir(WORKFLOW_RUNS_DIR, { withFileTypes: true });
+  const runs = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readWorkflowRunFile(path.join(WORKFLOW_RUNS_DIR, entry.name));
+      if (item.type === "workflowRun") {
+        runs.push(item);
+      }
+    } catch (error) {
+      runs.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "workflowRun",
+        title: "读取失败",
+        status: "paused",
+        reviewId: "",
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  const filtered = runs.filter((run) => {
+    if (filters.status && run.status !== filters.status) return false;
+    if (filters.reviewId && run.reviewId !== filters.reviewId) return false;
+    if (filters.definitionKey && run.definitionKey !== filters.definitionKey) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  return filtered;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
@@ -2106,6 +2230,18 @@ async function getRhythmLog(id) {
   }
 }
 
+async function getWorkflowRun(id) {
+  const filePath = workflowRunPath(id);
+  if (!filePath) return null;
+
+  try {
+    return await readWorkflowRunFile(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function saveOpportunity(opportunity) {
   await ensureContentDirs();
   const filePath = opportunityPath(opportunity.id);
@@ -2252,6 +2388,16 @@ async function saveRhythmLog(log) {
   return log;
 }
 
+async function saveWorkflowRun(run) {
+  await ensureContentDirs();
+  const filePath = workflowRunPath(run.id);
+  if (!filePath) {
+    throw new Error("Invalid workflow run id");
+  }
+  await writeFile(filePath, workflowRunToMarkdown(run), "utf8");
+  return run;
+}
+
 const storage = {
   listOpportunities,
   listInterviews,
@@ -2268,6 +2414,7 @@ const storage = {
   listAiAnalysisNotes,
   listAiFrontierCards,
   listRhythmLogs,
+  listWorkflowRuns,
   getOpportunity,
   getInterview,
   getBrief,
@@ -2282,6 +2429,7 @@ const storage = {
   getAiAnalysisNote,
   getAiFrontierCard,
   getRhythmLog,
+  getWorkflowRun,
   saveOpportunity,
   saveInterview,
   saveBrief,
@@ -2297,6 +2445,7 @@ const storage = {
   saveAiAnalysisNote,
   saveAiFrontierCard,
   saveRhythmLog,
+  saveWorkflowRun,
 };
 
 function ruleDateBucket(value) {
@@ -2605,6 +2754,24 @@ function buildDispatchQueue(data) {
       );
     });
 
+  data.workflowRuns
+    .filter((item) => !["completed", "paused"].includes(item.status))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `workflow-${item.id}`,
+          type: "workflow",
+          title: item.title,
+          meta: item.status,
+          module: "workflow",
+          targetId: item.id,
+          priority: item.status === "candidate_confirmation" ? "critical" : "high",
+          reason: `流程等待：${item.waitingFor}`,
+          actionLabel: "查看流程",
+        }),
+      );
+    });
+
   const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
   return items.sort((a, b) => {
     const priorityDiff = (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9);
@@ -2642,6 +2809,7 @@ async function readSystemData() {
     aiAnalysisNotes,
     aiFrontierCards,
     rhythmLogs,
+    workflowRuns,
   ] = await Promise.all([
     storage.listOpportunities(),
     storage.listInterviews(),
@@ -2658,6 +2826,7 @@ async function readSystemData() {
     storage.listAiAnalysisNotes(),
     storage.listAiFrontierCards(),
     storage.listRhythmLogs(),
+    storage.listWorkflowRuns(),
   ]);
 
   return {
@@ -2676,6 +2845,7 @@ async function readSystemData() {
     aiAnalysisNotes,
     aiFrontierCards,
     rhythmLogs,
+    workflowRuns,
   };
 }
 
@@ -2732,6 +2902,12 @@ function buildSystemSnapshot(data) {
       total: data.rhythmLogs.length,
       recoveryNeeded: data.rhythmLogs.filter((item) => item.status === "recovery_needed").length,
       highRisk: data.rhythmLogs.filter((item) => item.rhythmRisk === "high").length,
+    },
+    workflowMetrics: {
+      total: data.workflowRuns.length,
+      active: data.workflowRuns.filter((item) => !["completed", "paused"].includes(item.status)).length,
+      waitingApproval: data.workflowRuns.filter((item) => item.status === "candidate_confirmation").length,
+      validationPending: data.workflowRuns.filter((item) => item.status === "validation_pending").length,
     },
   };
 }
@@ -2794,6 +2970,168 @@ async function linkTaskToWeakness(task) {
   const nextWeakness = normalizeWeakness({ ...weakness, linkedTrainingTaskIds, status }, weakness);
   await saveWeakness(nextWeakness);
   return nextWeakness;
+}
+
+function workflowEvent(type, sourceId = "", note = "") {
+  return {
+    type,
+    at: new Date().toISOString(),
+    sourceId: String(sourceId || ""),
+    note: String(note || ""),
+  };
+}
+
+function appendWorkflowEvent(run, event) {
+  const events = [...(run.events || [])];
+  if (event.sourceId && events.some((item) => item.type === event.type && item.sourceId === event.sourceId)) {
+    return events;
+  }
+  events.push(event);
+  return events;
+}
+
+function workflowProgressFromRecords(run, aiNote, tasks) {
+  if (run.status === "paused" || run.status === "completed") {
+    return { status: run.status, currentStep: run.currentStep, waitingFor: run.waitingFor };
+  }
+  if (tasks.length) {
+    if (tasks.every((task) => task.status === "validated")) {
+      return { status: "validation_pending", currentStep: "verify_in_interview", waitingFor: "validation" };
+    }
+    if (tasks.some((task) => ["doing", "reviewing", "done"].includes(task.status))) {
+      return { status: "training_in_progress", currentStep: "execute_training", waitingFor: "training" };
+    }
+    return { status: "training_pending", currentStep: "start_training", waitingFor: "training" };
+  }
+  const hasCandidates = (aiNote?.weaknessCandidates || []).length || (aiNote?.trainingTaskCandidates || []).length;
+  if (hasCandidates) {
+    return { status: "candidate_confirmation", currentStep: "confirm_candidates", waitingFor: "human_action" };
+  }
+  return { status: "diagnosis_pending", currentStep: "generate_diagnosis", waitingFor: "ai_generation" };
+}
+
+async function refreshWorkflowRun(run, event = null, { forceProgress = false } = {}) {
+  const [analysisNotes, weaknesses, tasks] = await Promise.all([
+    storage.listAiAnalysisNotes({ analysisType: "review_diagnosis", sourceType: "interview_review" }),
+    storage.listWeaknesses(),
+    storage.listTrainingTasks(),
+  ]);
+  const aiNote = analysisNotes.find((note) => note.id === run.aiAnalysisNoteId)
+    || analysisNotes.find((note) => note.workflowRunId === run.id)
+    || analysisNotes.find((note) => note.sourceId === run.reviewId)
+    || null;
+  const relatedWeaknesses = weaknesses.filter((weakness) => (weakness.relatedReviewIds || []).includes(run.reviewId));
+  const weaknessIds = relatedWeaknesses.map((weakness) => weakness.id);
+  const relatedTasks = tasks.filter(
+    (task) => task.status !== "cancelled" && (task.relatedReviewId === run.reviewId || weaknessIds.includes(task.weaknessId)),
+  );
+  const statusSeed = forceProgress && ["paused", "completed"].includes(run.status)
+    ? { ...run, status: "diagnosis_pending" }
+    : run;
+  const progress = workflowProgressFromRecords(statusSeed, aiNote, relatedTasks);
+  let events = run.events || [];
+  if (event) {
+    events = appendWorkflowEvent(run, event);
+  }
+  if (progress.status !== run.status && !["paused", "completed"].includes(progress.status)) {
+    events = appendWorkflowEvent(
+      { ...run, events },
+      workflowEvent("status_changed", progress.status, `流程进入 ${progress.status}`),
+    );
+  }
+  const nextRun = normalizeWorkflowRun(
+    {
+      ...run,
+      ...progress,
+      aiAnalysisNoteId: aiNote?.id || run.aiAnalysisNoteId,
+      weaknessIds,
+      trainingTaskIds: relatedTasks.map((task) => task.id),
+      events,
+    },
+    run,
+  );
+  await storage.saveWorkflowRun(nextRun);
+  return nextRun;
+}
+
+async function syncWorkflowRunsForReview(reviewId, event = null) {
+  if (!reviewId) return [];
+  const runs = await storage.listWorkflowRuns({ reviewId });
+  const updated = [];
+  for (const run of runs.filter((item) => item.status !== "completed")) {
+    updated.push(await refreshWorkflowRun(run, event));
+  }
+  return updated;
+}
+
+async function syncWorkflowRunsForTask(task, event = null) {
+  const weakness = await storage.getWeakness(task.weaknessId);
+  const reviewIds = unique([
+    task.relatedReviewId,
+    ...(weakness?.relatedReviewIds || []),
+  ].filter(Boolean));
+  const updated = [];
+  for (const reviewId of reviewIds) {
+    updated.push(...await syncWorkflowRunsForReview(reviewId, event));
+  }
+  return updated;
+}
+
+async function startWorkflowRunForReview(reviewId) {
+  const review = await storage.getReview(reviewId);
+  if (!review) throw new Error("Related interview review not found");
+  const existing = (await storage.listWorkflowRuns({ reviewId })).find((run) => run.status !== "completed");
+  if (existing) return { workflowRun: await refreshWorkflowRun(existing), created: false };
+
+  const run = normalizeWorkflowRun({
+    reviewId: review.id,
+    opportunityId: review.opportunityId,
+    interviewRoundId: review.interviewRoundId,
+    title: `${review.companyName} - ${review.roundName}修复闭环`,
+    events: [workflowEvent("workflow_started", review.id, "从面试复盘开启修复流程")],
+  }, {}, review);
+  await storage.saveWorkflowRun(run);
+  return { workflowRun: await refreshWorkflowRun(run), created: true };
+}
+
+async function updateWorkflowRunAction(existing, input) {
+  const action = String(input.action || "");
+  const summary = String(input.summary ?? existing.summary ?? "");
+  if (action === "pause") {
+    const next = normalizeWorkflowRun({
+      ...existing,
+      status: "paused",
+      waitingFor: "human_action",
+      summary,
+      events: appendWorkflowEvent(existing, workflowEvent("workflow_paused", existing.id, "用户暂停流程")),
+    }, existing);
+    await storage.saveWorkflowRun(next);
+    return next;
+  }
+  if (action === "complete") {
+    const next = normalizeWorkflowRun({
+      ...existing,
+      status: "completed",
+      currentStep: "closed",
+      waitingFor: "none",
+      summary,
+      events: appendWorkflowEvent(existing, workflowEvent("workflow_completed", existing.id, "用户关闭闭环")),
+    }, existing);
+    await storage.saveWorkflowRun(next);
+    return next;
+  }
+  if (action === "resume") {
+    const next = normalizeWorkflowRun({
+      ...existing,
+      status: "diagnosis_pending",
+      waitingFor: "ai_generation",
+      summary,
+      events: appendWorkflowEvent(existing, workflowEvent("workflow_resumed", existing.id, "用户恢复流程")),
+    }, existing);
+    await storage.saveWorkflowRun(next);
+    return refreshWorkflowRun(next, null, { forceProgress: true });
+  }
+  throw new Error("Unsupported workflow action");
 }
 
 async function getExpressionDrillSource(sourceType, sourceId) {
@@ -3165,6 +3503,10 @@ async function parseAiAnalysisCandidates(note, structuredResponse) {
     note,
   );
   await storage.saveAiAnalysisNote(nextNote);
+  await syncWorkflowRunsForReview(
+    nextNote.sourceId,
+    workflowEvent("diagnosis_generated", nextNote.id, "诊断候选已生成，等待人工确认"),
+  );
   return nextNote;
 }
 
@@ -3327,6 +3669,12 @@ async function actOnAiCandidate(note, input) {
     }
     const nextNote = normalizeAiAnalysisNote({ ...note, weaknessCandidates: candidates }, note);
     await storage.saveAiAnalysisNote(nextNote);
+    if (action === "accept") {
+      await syncWorkflowRunsForReview(
+        note.sourceId,
+        workflowEvent("candidate_accepted", `weakness:${candidate.id}`, "已采纳能力缺陷候选"),
+      );
+    }
     return { aiAnalysisNote: nextNote, weakness };
   }
 
@@ -3369,6 +3717,12 @@ async function actOnAiCandidate(note, input) {
     }
     const nextNote = normalizeAiAnalysisNote({ ...note, trainingTaskCandidates: candidates }, note);
     await storage.saveAiAnalysisNote(nextNote);
+    if (action === "accept") {
+      await syncWorkflowRunsForReview(
+        note.sourceId,
+        workflowEvent("candidate_accepted", `training_task:${candidate.id}`, "已采纳训练任务候选"),
+      );
+    }
     return { aiAnalysisNote: nextNote, task, weakness };
   }
 
@@ -3614,6 +3968,9 @@ async function handleApi(req, res, url) {
       const weakness = normalizeWeakness(body);
       await saveWeakness(weakness);
       await linkWeaknessToReviews(weakness);
+      for (const reviewId of weakness.relatedReviewIds || []) {
+        await syncWorkflowRunsForReview(reviewId);
+      }
       return sendJson(res, 201, { weakness });
     }
 
@@ -3637,6 +3994,9 @@ async function handleApi(req, res, url) {
       const weakness = normalizeWeakness({ ...body, id }, existing);
       await saveWeakness(weakness);
       await linkWeaknessToReviews(weakness);
+      for (const reviewId of weakness.relatedReviewIds || []) {
+        await syncWorkflowRunsForReview(reviewId);
+      }
       return sendJson(res, 200, { weakness });
     }
 
@@ -3660,6 +4020,10 @@ async function handleApi(req, res, url) {
       const task = normalizeTrainingTask(body, {}, weakness);
       await saveTrainingTask(task);
       const updatedWeakness = await linkTaskToWeakness(task);
+      await syncWorkflowRunsForTask(
+        task,
+        workflowEvent("training_available", task.id, "已创建训练任务"),
+      );
       return sendJson(res, 201, { task, weakness: updatedWeakness });
     }
 
@@ -3687,6 +4051,11 @@ async function handleApi(req, res, url) {
       const task = normalizeTrainingTask({ ...body, id }, existing, weakness);
       await saveTrainingTask(task);
       const updatedWeakness = await linkTaskToWeakness(task);
+      const eventType = task.status === "validated" ? "training_validated" : "training_started";
+      await syncWorkflowRunsForTask(
+        task,
+        workflowEvent(eventType, `${task.id}:${task.status}`, `训练状态更新为 ${task.status}`),
+      );
       return sendJson(res, 200, { task, weakness: updatedWeakness });
     }
 
@@ -4054,6 +4423,49 @@ async function handleApi(req, res, url) {
     return methodNotAllowed(res);
   }
 
+  if (url.pathname === "/api/workflow-runs") {
+    if (req.method === "GET") {
+      const status = url.searchParams.get("status") || "";
+      const reviewId = url.searchParams.get("reviewId") || "";
+      const workflowRuns = await storage.listWorkflowRuns({ status, reviewId });
+      return sendJson(res, 200, { workflowRuns });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      try {
+        const result = await startWorkflowRunForReview(String(body.reviewId || "").trim());
+        return sendJson(res, result.created ? 201 : 200, result);
+      } catch (error) {
+        return sendJson(res, 400, { error: error.message });
+      }
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  const workflowRunMatch = url.pathname.match(/^\/api\/workflow-runs\/([^/]+)$/);
+  if (workflowRunMatch) {
+    const id = decodeURIComponent(workflowRunMatch[1]);
+    if (req.method === "GET") {
+      const workflowRun = await storage.getWorkflowRun(id);
+      if (!workflowRun) return notFound(res);
+      return sendJson(res, 200, { workflowRun });
+    }
+    if (req.method === "PUT") {
+      const existing = await storage.getWorkflowRun(id);
+      if (!existing) return notFound(res);
+      const body = await readRequestBody(req);
+      try {
+        const workflowRun = await updateWorkflowRunAction(existing, body);
+        return sendJson(res, 200, { workflowRun });
+      } catch (error) {
+        return sendJson(res, 400, { error: error.message });
+      }
+    }
+    return methodNotAllowed(res);
+  }
+
   if (url.pathname === "/api/ai-analysis-notes") {
     if (req.method === "GET") {
       const analysisType = url.searchParams.get("analysisType") || "";
@@ -4067,6 +4479,9 @@ async function handleApi(req, res, url) {
       const body = await readRequestBody(req);
       const note = normalizeAiAnalysisNote(body);
       await saveAiAnalysisNote(note);
+      if (note.sourceType === "interview_review") {
+        await syncWorkflowRunsForReview(note.sourceId);
+      }
       return sendJson(res, 201, { aiAnalysisNote: note });
     }
 
@@ -4138,6 +4553,9 @@ async function handleApi(req, res, url) {
       const body = await readRequestBody(req);
       const note = normalizeAiAnalysisNote({ ...body, id }, existing);
       await saveAiAnalysisNote(note);
+      if (note.sourceType === "interview_review") {
+        await syncWorkflowRunsForReview(note.sourceId);
+      }
       return sendJson(res, 200, { aiAnalysisNote: note });
     }
 

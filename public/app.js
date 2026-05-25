@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.21";
+const APP_VERSION = "v0.22";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -245,6 +245,24 @@ const AI_ANALYSIS_STATUSES = [
   ["archived", "已归档"],
 ];
 
+const WORKFLOW_STATUSES = [
+  ["diagnosis_pending", "待生成诊断"],
+  ["candidate_confirmation", "待确认候选"],
+  ["training_pending", "待开始训练"],
+  ["training_in_progress", "训练中"],
+  ["validation_pending", "待真实验证"],
+  ["completed", "已完成"],
+  ["paused", "已暂停"],
+];
+
+const WORKFLOW_WAITING_FOR = [
+  ["human_action", "你的确认"],
+  ["ai_generation", "生成诊断"],
+  ["training", "训练推进"],
+  ["validation", "真实验证"],
+  ["none", "无待办"],
+];
+
 const AI_FRONTIER_CATEGORIES = [
   ["model_capability", "模型能力"],
   ["ai_product", "AI 产品"],
@@ -280,6 +298,7 @@ const RHYTHM_STATUSES = [
 
 const MODULES = [
   ["dashboard", "总控调度器", "00"],
+  ["workflow", "流程运行", "WF"],
   ["pipeline", "求职中台", "01"],
   ["preInterview", "面试前作战室", "02"],
   ["postInterview", "面试后复盘室", "03"],
@@ -513,6 +532,7 @@ const EMPTY_PORTFOLIO_PROJECT = {
 
 const EMPTY_AI_ANALYSIS_NOTE = {
   analysisType: "project_match",
+  workflowRunId: "",
   sourceType: "freeform",
   sourceId: "",
   sourceTitle: "",
@@ -587,6 +607,7 @@ const state = {
   portfolioProjects: [],
   portfolioPreviewMode: false,
   aiAnalysisNotes: [],
+  workflowRuns: [],
   aiFrontierCards: [],
   rhythmLogs: [],
   systemSnapshot: null,
@@ -612,6 +633,7 @@ const state = {
   trainingPlanView: "overview",
   selectedPortfolioProjectId: null,
   selectedAiAnalysisNoteId: null,
+  selectedWorkflowRunId: null,
   selectedAiFrontierCardId: null,
   selectedRhythmLogId: null,
   draft: null,
@@ -642,6 +664,7 @@ const state = {
   savingPortfolioProfile: false,
   savingPortfolioProject: false,
   savingAiAnalysisNote: false,
+  savingWorkflowRun: false,
   runningAiDiagnosis: false,
   parsingAiCandidates: false,
   actingAiCandidateId: null,
@@ -736,6 +759,7 @@ async function loadData() {
       portfolioProfilePayload,
       portfolioProjectsPayload,
       aiAnalysisNotesPayload,
+      workflowRunsPayload,
       aiFrontierCardsPayload,
       rhythmLogsPayload,
       systemSnapshotPayload,
@@ -753,6 +777,7 @@ async function loadData() {
       api("/api/portfolio-profile"),
       api("/api/portfolio-projects"),
       api("/api/ai-analysis-notes"),
+      api("/api/workflow-runs"),
       api("/api/ai-frontier-cards"),
       api("/api/rhythm-logs"),
       api("/api/system-snapshot").catch(() => null),
@@ -770,6 +795,7 @@ async function loadData() {
     state.portfolioProfile = portfolioProfilePayload.profile || { ...EMPTY_PORTFOLIO_PROFILE };
     state.portfolioProjects = portfolioProjectsPayload.portfolioProjects || [];
     state.aiAnalysisNotes = aiAnalysisNotesPayload.aiAnalysisNotes || [];
+    state.workflowRuns = workflowRunsPayload.workflowRuns || [];
     state.aiFrontierCards = aiFrontierCardsPayload.aiFrontierCards || [];
     state.rhythmLogs = rhythmLogsPayload.rhythmLogs || [];
     state.systemSnapshot = systemSnapshotPayload?.snapshot || null;
@@ -811,6 +837,9 @@ async function loadData() {
     }
     if (!state.selectedAiAnalysisNoteId && state.aiAnalysisNotes.length) {
       state.selectedAiAnalysisNoteId = state.aiAnalysisNotes[0].id;
+    }
+    if (!state.selectedWorkflowRunId && state.workflowRuns.length) {
+      state.selectedWorkflowRunId = state.workflowRuns[0].id;
     }
     if (!state.selectedAiFrontierCardId && state.aiFrontierCards.length) {
       state.selectedAiFrontierCardId = state.aiFrontierCards[0].id;
@@ -1000,6 +1029,18 @@ function selectedPortfolioProject() {
 function selectedAiAnalysisNote() {
   if (state.aiAnalysisNoteDraft) return state.aiAnalysisNoteDraft;
   return state.aiAnalysisNotes.find((item) => item.id === state.selectedAiAnalysisNoteId) || null;
+}
+
+function workflowForReview(reviewId) {
+  return (
+    state.workflowRuns.find((item) => item.reviewId === reviewId && item.status !== "completed") ||
+    state.workflowRuns.find((item) => item.reviewId === reviewId) ||
+    null
+  );
+}
+
+function selectedWorkflowRun() {
+  return state.workflowRuns.find((item) => item.id === state.selectedWorkflowRunId) || null;
 }
 
 function selectedAiFrontierCard() {
@@ -1370,6 +1411,12 @@ function openAiAnalysisNote(id) {
   selectAiAnalysisNote(id);
 }
 
+function openWorkflowRun(id) {
+  state.activeModule = "workflow";
+  state.selectedWorkflowRunId = id;
+  render();
+}
+
 function openAiFrontierCard(id) {
   state.activeModule = "aiFrontier";
   selectAiFrontierCard(id);
@@ -1502,6 +1549,10 @@ function openDispatchItem(id) {
   }
   if (item.module === "aiAnalysis") {
     openAiAnalysisNote(item.targetId);
+    return;
+  }
+  if (item.module === "workflow") {
+    openWorkflowRun(item.targetId);
     return;
   }
   if (item.module === "aiFrontier") {
@@ -1732,9 +1783,88 @@ function beginAiDiagnosisFromSelectedReview() {
     sourceId: review.id,
     sourceTitle: `${review.companyName} - ${review.roundName}复盘`,
     title: `${review.companyName} ${review.roundName}复盘诊断`,
+    workflowRunId: workflowForReview(review.id)?.id || "",
   };
   state.selectedAiAnalysisNoteId = null;
   render();
+}
+
+async function refreshWorkflowState() {
+  const [workflowPayload, snapshotPayload] = await Promise.all([
+    api("/api/workflow-runs"),
+    api("/api/system-snapshot").catch(() => null),
+  ]);
+  state.workflowRuns = workflowPayload.workflowRuns || [];
+  state.systemSnapshot = snapshotPayload?.snapshot || state.systemSnapshot;
+}
+
+async function startWorkflowFromSelectedReview() {
+  const review = selectedReview();
+  if (!review?.id || state.reviewDraft) {
+    showInfo("请先保存一份复盘，再开启修复流程");
+    return;
+  }
+  state.savingWorkflowRun = true;
+  render();
+  try {
+    const result = await api("/api/workflow-runs", {
+      method: "POST",
+      body: JSON.stringify({ reviewId: review.id }),
+    });
+    await refreshWorkflowState();
+    state.selectedWorkflowRunId = result.workflowRun.id;
+    state.activeModule = "workflow";
+    showToast(result.created ? "修复流程已开启" : "已打开现有修复流程");
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    state.savingWorkflowRun = false;
+    render();
+  }
+}
+
+function openReviewFromWorkflow(run) {
+  if (!run?.interviewRoundId) return;
+  state.selectedReviewId = run.reviewId;
+  openReviewForInterview(run.interviewRoundId);
+}
+
+function openDiagnosisFromWorkflow(run) {
+  if (!run) return;
+  if (run.aiAnalysisNoteId) {
+    openAiAnalysisNote(run.aiAnalysisNoteId);
+    return;
+  }
+  const review = state.reviews.find((item) => item.id === run.reviewId);
+  if (!review) {
+    showInfo("没有找到该流程关联的复盘");
+    return;
+  }
+  state.selectedReviewId = review.id;
+  state.selectedInterviewId = review.interviewRoundId;
+  beginAiDiagnosisFromSelectedReview();
+}
+
+async function updateSelectedWorkflow(action) {
+  const run = selectedWorkflowRun();
+  if (!run || state.savingWorkflowRun) return;
+  const summary = document.querySelector("#workflow-summary")?.value || run.summary || "";
+  state.savingWorkflowRun = true;
+  render();
+  try {
+    const result = await api(`/api/workflow-runs/${encodeURIComponent(run.id)}`, {
+      method: "PUT",
+      body: JSON.stringify({ action, summary }),
+    });
+    await refreshWorkflowState();
+    state.selectedWorkflowRunId = result.workflowRun.id;
+    showToast(action === "pause" ? "流程已暂停" : action === "resume" ? "流程已恢复" : "流程已完成");
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    state.savingWorkflowRun = false;
+    render();
+  }
 }
 
 function beginNewOpportunity() {
@@ -2691,6 +2821,24 @@ function createDispatchQueue() {
       );
     });
 
+  state.workflowRuns
+    .filter((item) => !["completed", "paused"].includes(item.status))
+    .forEach((item) => {
+      items.push(
+        createDispatchItem({
+          id: `workflow-${item.id}`,
+          type: "workflow",
+          title: item.title,
+          meta: optionLabel(WORKFLOW_STATUSES, item.status),
+          module: "workflow",
+          targetId: item.id,
+          priority: item.status === "candidate_confirmation" ? "critical" : "high",
+          reason: `流程等待：${optionLabel(WORKFLOW_WAITING_FOR, item.waitingFor)}`,
+          actionLabel: "查看流程",
+        }),
+      );
+    });
+
   const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
   return items.sort((a, b) => {
     const priorityDiff = (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9);
@@ -2707,7 +2855,7 @@ function dispatchMetrics(queue) {
     total: queue.length,
     critical: queue.filter((item) => item.priority === "critical").length,
     dueNow: queue.filter((item) => ["overdue", "today"].includes(dateBucket(item.dueAt))).length,
-    decisions: queue.filter((item) => item.type === "ai-analysis" || item.type === "interview-review").length,
+    decisions: queue.filter((item) => ["ai-analysis", "interview-review", "workflow"].includes(item.type)).length,
   };
 }
 
@@ -3264,6 +3412,9 @@ function attachCommonEvents() {
   document.querySelectorAll("[data-dashboard-ai-note-id]").forEach((button) => {
     button.addEventListener("click", () => openAiAnalysisNote(button.dataset.dashboardAiNoteId));
   });
+  document.querySelectorAll("[data-dashboard-workflow-id], [data-workflow-run-id]").forEach((button) => {
+    button.addEventListener("click", () => openWorkflowRun(button.dataset.dashboardWorkflowId || button.dataset.workflowRunId));
+  });
   document.querySelectorAll("[data-dispatch-id]").forEach((button) => {
     button.addEventListener("click", () => openDispatchItem(button.dataset.dispatchId));
   });
@@ -3343,6 +3494,18 @@ function attachCommonEvents() {
   document.querySelector("#create-review-btn")?.addEventListener("click", beginReviewForSelectedInterview);
   document.querySelector("#create-weakness-from-review-btn")?.addEventListener("click", beginWeaknessFromSelectedReview);
   document.querySelector("#create-ai-diagnosis-from-review-btn")?.addEventListener("click", beginAiDiagnosisFromSelectedReview);
+  document.querySelector("#start-workflow-from-review-btn")?.addEventListener("click", startWorkflowFromSelectedReview);
+  document.querySelector("#open-workflow-review-btn")?.addEventListener("click", () => openReviewFromWorkflow(selectedWorkflowRun()));
+  document.querySelector("#open-workflow-ai-btn")?.addEventListener("click", () => openDiagnosisFromWorkflow(selectedWorkflowRun()));
+  document.querySelectorAll("[data-workflow-weakness-id]").forEach((button) => {
+    button.addEventListener("click", () => openWeakness(button.dataset.workflowWeaknessId));
+  });
+  document.querySelectorAll("[data-workflow-task-id]").forEach((button) => {
+    button.addEventListener("click", () => openTrainingTask(button.dataset.workflowTaskId));
+  });
+  document.querySelectorAll("[data-workflow-action]").forEach((button) => {
+    button.addEventListener("click", () => updateSelectedWorkflow(button.dataset.workflowAction));
+  });
   document.querySelector("#new-weakness-btn")?.addEventListener("click", () => beginNewWeakness());
   document.querySelectorAll(".new-training-task-btn").forEach((button) => {
     button.addEventListener("click", beginTrainingTaskForSelectedWeakness);
@@ -3895,6 +4058,7 @@ async function submitTrainingTask(event) {
     ]);
     state.trainingTasks = taskList.tasks || [];
     state.weaknesses = weaknessList.weaknesses || [];
+    await refreshWorkflowState();
   } catch (error) {
     showError(error.message);
   } finally {
@@ -4237,6 +4401,7 @@ function formToAiAnalysisNote(form) {
   const formData = new FormData(form);
   return {
     analysisType: formData.get("analysisType"),
+    workflowRunId: formData.get("workflowRunId"),
     sourceType: formData.get("sourceType"),
     sourceId: formData.get("sourceId"),
     sourceTitle: formData.get("sourceTitle"),
@@ -4317,6 +4482,7 @@ async function submitAiAnalysisNote(event) {
     showToast("AI 分析记录已保存");
     const list = await api("/api/ai-analysis-notes");
     state.aiAnalysisNotes = list.aiAnalysisNotes || [];
+    await refreshWorkflowState();
   } catch (error) {
     showError(error.message);
   } finally {
@@ -4384,6 +4550,7 @@ async function parseAiAnalysisCandidates() {
     state.aiAnalysisNotes = state.aiAnalysisNotes.map((item) =>
       item.id === note.id ? result.aiAnalysisNote : item,
     );
+    await refreshWorkflowState();
     showToast("结构化候选已解析并保存");
   } catch (error) {
     showError(error.message);
@@ -4422,6 +4589,7 @@ async function handleAiCandidateAction(button) {
     } else {
       showToast("候选已忽略");
     }
+    await refreshWorkflowState();
   } catch (error) {
     showError(error.message);
   } finally {
@@ -4747,6 +4915,9 @@ function renderDashboard() {
   const pendingAiDecisions = state.aiAnalysisNotes
     .filter((item) => item.status === "ai_responded")
     .slice(0, 6);
+  const activeWorkflowRuns = state.workflowRuns
+    .filter((item) => !["completed", "paused"].includes(item.status))
+    .slice(0, 6);
   const dispatchQueue = createDispatchQueue();
 
   return `
@@ -4755,6 +4926,35 @@ function renderDashboard() {
     ${renderTodayActions(dispatchQueue)}
     ${renderDispatchOverview(dispatchQueue)}
     <div class="dashboard-grid">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">修复流程</h2>
+            <p class="panel-subtitle">从复盘诊断走向训练和真实验证的进行中流程。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="work-list">
+            ${
+              activeWorkflowRuns.length
+                ? activeWorkflowRuns
+                    .map(
+                      (item) => `
+                        <button class="work-item" data-dashboard-workflow-id="${escapeHtml(item.id)}" type="button">
+                          <div>
+                            <p class="work-item-title">${escapeHtml(item.title)}</p>
+                            <p class="work-item-meta">等待：${optionLabel(WORKFLOW_WAITING_FOR, item.waitingFor)}</p>
+                          </div>
+                          <span class="tag workflow-${item.status}">${optionLabel(WORKFLOW_STATUSES, item.status)}</span>
+                        </button>
+                      `,
+                    )
+                    .join("")
+                : `<div class="empty">暂无进行中的修复流程。复盘保存后即可开启第一条流程。</div>`
+            }
+          </div>
+        </div>
+      </section>
       <section class="panel">
         <div class="panel-header">
           <div>
@@ -5305,6 +5505,164 @@ function renderPostInterview() {
   `;
 }
 
+function renderWorkflow() {
+  const run = selectedWorkflowRun();
+  const active = state.workflowRuns.filter((item) => !["completed", "paused"].includes(item.status)).length;
+  const awaitingApproval = state.workflowRuns.filter((item) => item.status === "candidate_confirmation").length;
+  const awaitingValidation = state.workflowRuns.filter((item) => item.status === "validation_pending").length;
+
+  return `
+    ${renderTopbar("流程运行", "管理从面试复盘到能力修复、训练验收与下一轮验证的可恢复流程。", "WF Workflow Runtime")}
+    <section class="grid metrics compact-metrics">
+      <div class="metric"><div class="metric-label">流程总数</div><div class="metric-value">${state.workflowRuns.length}</div></div>
+      <div class="metric"><div class="metric-label">运行中</div><div class="metric-value">${active}</div></div>
+      <div class="metric"><div class="metric-label">待确认</div><div class="metric-value">${awaitingApproval}</div></div>
+      <div class="metric"><div class="metric-label">待验证</div><div class="metric-value">${awaitingValidation}</div></div>
+    </section>
+    <div class="workspace workflow-workspace">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">修复流程列表</h2>
+            <p class="panel-subtitle">每份已保存复盘可以启动一条受控闭环。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          ${
+            state.workflowRuns.length
+              ? `<div class="work-list">
+                  ${state.workflowRuns
+                    .map(
+                      (item) => `
+                        <button class="work-item ${item.id === state.selectedWorkflowRunId ? "active" : ""}" data-workflow-run-id="${escapeHtml(item.id)}" type="button">
+                          <div>
+                            <p class="work-item-title">${escapeHtml(item.title)}</p>
+                            <p class="work-item-meta">等待：${optionLabel(WORKFLOW_WAITING_FOR, item.waitingFor)}</p>
+                          </div>
+                          <span class="tag workflow-${item.status}">${optionLabel(WORKFLOW_STATUSES, item.status)}</span>
+                        </button>
+                      `,
+                    )
+                    .join("")}
+                </div>`
+              : `<div class="empty">暂无流程记录。先在面试后复盘室保存复盘并开启修复流程。</div>
+                 <div class="actions workflow-empty-action"><button class="btn primary" data-module-shortcut="postInterview" type="button">进入复盘室</button></div>`
+          }
+        </div>
+      </section>
+      ${renderWorkflowDetail(run)}
+    </div>
+  `;
+}
+
+function renderWorkflowDetail(run) {
+  if (!run) {
+    return `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">流程详情</h2>
+            <p class="panel-subtitle">选择一条流程查看推进阶段和关联资产。</p>
+          </div>
+        </div>
+        <div class="panel-body"><div class="empty">当前没有选中的流程。</div></div>
+      </section>
+    `;
+  }
+
+  const review = state.reviews.find((item) => item.id === run.reviewId);
+  const aiNote = state.aiAnalysisNotes.find((item) => item.id === run.aiAnalysisNoteId);
+  const weaknesses = state.weaknesses.filter((item) => (run.weaknessIds || []).includes(item.id));
+  const tasks = state.trainingTasks.filter((item) => (run.trainingTaskIds || []).includes(item.id));
+  const eventLabels = {
+    workflow_started: "流程开启",
+    diagnosis_generated: "诊断候选生成",
+    candidate_accepted: "候选已采纳",
+    training_available: "训练任务可用",
+    training_started: "训练推进",
+    training_validated: "训练验收",
+    workflow_completed: "流程完成",
+    workflow_paused: "流程暂停",
+    workflow_resumed: "流程恢复",
+    status_changed: "阶段更新",
+  };
+  const events = [...(run.events || [])].reverse();
+
+  return `
+    <section class="panel workflow-detail">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">${escapeHtml(run.title)}</h2>
+          <p class="panel-subtitle">当前等待：${optionLabel(WORKFLOW_WAITING_FOR, run.waitingFor)}</p>
+        </div>
+        <span class="tag workflow-${run.status}">${optionLabel(WORKFLOW_STATUSES, run.status)}</span>
+      </div>
+      <div class="panel-body workflow-detail-body">
+        <div class="actions">
+          <button class="btn" id="open-workflow-review-btn" type="button">查看复盘</button>
+          <button class="btn primary" id="open-workflow-ai-btn" type="button">${aiNote ? "查看 AI 诊断" : "建立 AI 诊断"}</button>
+        </div>
+        <div class="workflow-relations">
+          <div class="workflow-block">
+            <h3>关联资产</h3>
+            <p class="mini-meta">${review ? escapeHtml(`${review.companyName} - ${review.roundName}复盘`) : "复盘记录不可用"}</p>
+            ${
+              weaknesses.length
+                ? weaknesses
+                    .map((item) => `<button class="relation-button" data-workflow-weakness-id="${escapeHtml(item.id)}" type="button">缺陷：${escapeHtml(item.title)}</button>`)
+                    .join("")
+                : `<p class="mini-meta">尚未采纳能力缺陷。</p>`
+            }
+            ${
+              tasks.length
+                ? tasks
+                    .map((item) => `<button class="relation-button" data-workflow-task-id="${escapeHtml(item.id)}" type="button">训练：${escapeHtml(item.title)} · ${optionLabel(TRAINING_TASK_STATUSES, item.status)}</button>`)
+                    .join("")
+                : `<p class="mini-meta">尚未生成训练任务。</p>`
+            }
+          </div>
+          <div class="workflow-block">
+            <h3>流程结论</h3>
+            <textarea id="workflow-summary" class="workflow-summary" placeholder="记录最终修复结论或下一轮面试的验证证据。">${escapeHtml(run.summary || "")}</textarea>
+            <div class="actions">
+              ${
+                run.status === "paused"
+                  ? `<button class="btn primary" data-workflow-action="resume" type="button"${disabledAttr(state.savingWorkflowRun)}>恢复流程</button>`
+                  : run.status !== "completed"
+                    ? `<button class="btn" data-workflow-action="pause" type="button"${disabledAttr(state.savingWorkflowRun)}>暂停流程</button>`
+                    : ""
+              }
+              ${
+                run.status !== "completed"
+                  ? `<button class="btn primary" data-workflow-action="complete" type="button"${disabledAttr(state.savingWorkflowRun)}>确认完成</button>`
+                  : ""
+              }
+            </div>
+          </div>
+        </div>
+        <div class="workflow-timeline">
+          <h3>推进记录</h3>
+          ${
+            events.length
+              ? events
+                  .map(
+                    (event) => `
+                      <div class="workflow-event">
+                        <strong>${escapeHtml(eventLabels[event.type] || event.type)}</strong>
+                        <time>${escapeHtml(formatDateTime(event.at))}</time>
+                        ${event.note ? `<p>${escapeHtml(event.note)}</p>` : ""}
+                      </div>
+                    `,
+                  )
+                  .join("")
+              : `<div class="empty">暂无推进记录。</div>`
+          }
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderReviewSelector() {
   if (!state.interviews.length) {
     return `<div class="empty">还没有面试轮次。先到求职中台创建面试轮次。</div>`;
@@ -5350,6 +5708,7 @@ function renderReviewProgress() {
 function renderReviewForm(interview) {
   const review = selectedReview();
   const isNew = Boolean(state.reviewDraft);
+  const workflow = !isNew && review?.id ? workflowForReview(review.id) : null;
 
   if (!interview) {
     return `<div class="empty">请选择一轮面试。</div>`;
@@ -5416,6 +5775,13 @@ function renderReviewForm(interview) {
               <p class="mini-meta">${(review.linkedWeaknessIds || []).length ? `已关联 ${(review.linkedWeaknessIds || []).length} 个缺陷` : "尚未关联能力缺陷"}</p>
             </div>
             <div class="actions">
+              ${
+                !isNew && workflow
+                  ? `<button class="btn primary" data-workflow-run-id="${escapeHtml(workflow.id)}" type="button">查看修复流程</button>`
+                  : !isNew
+                    ? `<button class="btn primary" id="start-workflow-from-review-btn" type="button"${disabledAttr(state.savingWorkflowRun)}>${state.savingWorkflowRun ? "开启中..." : "开启修复流程"}</button>`
+                    : ""
+              }
               <button class="btn" id="create-ai-diagnosis-from-review-btn" type="button">生成 AI 诊断流程</button>
               <button class="btn" id="create-weakness-from-review-btn" type="button">直接创建缺陷</button>
             </div>
@@ -6857,6 +7223,7 @@ function renderAiAnalysisDetail(note) {
       <div class="panel-body">
         ${renderAiRunNotice(note, isNew)}
         <form id="ai-analysis-form" class="form-grid compact-form ai-analysis-form">
+          <input name="workflowRunId" type="hidden" value="${escapeHtml(note.workflowRunId || "")}" />
           <div class="form-field full">
             <label>标题</label>
             <input name="title" value="${escapeHtml(note.title)}" placeholder="例如：拆解某公司 AI PM JD" required />
@@ -7399,6 +7766,7 @@ function render() {
   if (state.activeModule === "pipeline") content = renderPipeline();
   if (state.activeModule === "preInterview") content = renderPreInterview();
   if (state.activeModule === "postInterview") content = renderPostInterview();
+  if (state.activeModule === "workflow") content = renderWorkflow();
   if (state.activeModule === "weakness") content = renderWeakness();
   if (state.activeModule === "projectAmmo") content = renderProjectAmmo();
   if (state.activeModule === "trainingPlan") content = renderTrainingPlan();

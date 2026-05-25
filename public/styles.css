@@ -871,6 +871,33 @@ h1 {
   color: var(--muted);
 }
 
+.tag.workflow-diagnosis_pending,
+.tag.workflow-training_pending {
+  background: var(--blue-bg);
+  color: var(--blue);
+}
+
+.tag.workflow-candidate_confirmation,
+.tag.workflow-training_in_progress {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.tag.workflow-validation_pending {
+  background: var(--purple-bg);
+  color: var(--purple);
+}
+
+.tag.workflow-completed {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.tag.workflow-paused {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
 .tag.frontier-inbox {
   background: var(--yellow-bg);
   color: var(--yellow);
@@ -1122,6 +1149,77 @@ textarea:focus {
   border-radius: var(--radius);
   padding: 12px;
   background: #fbfaf5;
+}
+
+.workflow-detail-body,
+.workflow-timeline,
+.workflow-relations,
+.workflow-block {
+  display: grid;
+  gap: 12px;
+}
+
+.workflow-relations {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workflow-block {
+  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: #fbfaf5;
+}
+
+.workflow-block h3,
+.workflow-timeline h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.relation-button {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 9px 10px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  font-size: 13px;
+}
+
+.relation-button:hover {
+  border-color: var(--accent);
+}
+
+.workflow-summary {
+  min-height: 92px;
+}
+
+.workflow-event {
+  border-left: 2px solid var(--accent);
+  padding: 4px 0 4px 12px;
+}
+
+.workflow-event strong {
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 13px;
+}
+
+.workflow-event time {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workflow-event p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.workflow-empty-action {
+  margin-top: 12px;
 }
 
 .training-closure-grid {
@@ -1825,6 +1923,7 @@ textarea:focus {
   .weakness-profile-grid,
   .war-room-grid,
   .answer-stats,
+  .workflow-relations,
   .placeholder-grid,
   .portfolio-preview-grid {
     grid-template-columns: 1fr;
