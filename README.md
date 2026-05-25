@@ -42,6 +42,7 @@
 暂不实现登录、云同步、公开发布、删除能力和自动采纳 AI 建议。v0.21 支持由用户主动触发面试复盘诊断模型调用，候选只有经采纳后才会写入缺陷或训练 Markdown。
 
 项目后续路线见 [Roadmap](docs/roadmap.zh.md)。
+Agent 与 Workflow 架构决策见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，下一实现版本范围见 [v0.22 产品规格](docs/v0.22-product-spec.zh.md)。
 
 ## 版本状态
 
