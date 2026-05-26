@@ -91,9 +91,23 @@ The process needs `OPENCLAW_ENTRY`, `OPENCLAW_HOME`, `OPENCLAW_STATE_DIR`, `OPEN
 
 The regular local app defaults to port `4173`. The smoke test defaults to app port `4355` and Gateway port `19123` to avoid an already running workbench, so its isolated plugin config must use `baseUrl: "http://127.0.0.1:4355"` (or a matching `WAY2AIPM_SMOKE_PORT` override).
 
+## Lobster Approval Smoke Test
+
+The isolated Runtime can also load the official `@openclaw/lobster@2026.5.22` plugin to validate its native approval pause/resume mechanism without calling any way2AIPM domain endpoint:
+
+```powershell
+$env:LOBSTER_STATE_DIR='D:\code\way2aipm\tmp\openclaw-v023\lobster-state'
+node integrations/openclaw/lobster-approval-smoke-test.mjs
+```
+
+This check additionally needs `OPENCLAW_ENTRY`, `OPENCLAW_HOME`, `OPENCLAW_STATE_DIR`, `OPENCLAW_CONFIG_PATH`, and `OPENCLAW_GATEWAY_TOKEN`. Set `plugins.allow` to only the trusted experiment plugins (`way2aipm-controlled-tools` and `lobster`) and include `lobster` in `tools.alsoAllow`.
+
+`LOBSTER_STATE_DIR` is required for this smoke test and must stay under `tmp/openclaw-v023/`. Without it, Lobster defaults its resume state to the user's home directory. On success, the test receives `needs_approval`, resumes with approval, receives `ok`, and Lobster removes the completed resume state.
+
 ## Runtime Safety Requirements
 
 - Use isolated `OPENCLAW_HOME`, `OPENCLAW_STATE_DIR`, and `OPENCLAW_CONFIG_PATH` paths for the experiment.
+- Use isolated `LOBSTER_STATE_DIR` when executing Lobster approval/resume experiments.
 - Expose only the bridge commands or equivalent HTTP calls as tools.
 - Enable sandboxing and explicit tool allow/deny controls before using real interview data.
 - Do not grant the Runtime arbitrary HTTP, shell, browser automation, or general-purpose file tools while it can access this local service.
@@ -102,4 +116,4 @@ The regular local app defaults to port `4173`. The smoke test defaults to app po
 
 ## Task Flow Boundary
 
-OpenClaw `2026.5.22` documents Lobster as the optional approval/resume tool, but it is a separately installable `@openclaw/lobster` plugin and is not present in the current isolated validation Runtime. Its documentation also states that nested `openclaw.invoke` calls are not currently reliable from the embedded Lobster runner. Therefore v0.23 validates controlled tool execution and the way2AIPM approval boundary; it does not claim a native Task Flow/Lobster orchestration integration.
+The official `@openclaw/lobster@2026.5.22` plugin has been loaded in the isolated Runtime and its native approval/resume behavior has been verified through Gateway invocation. This proves an approval checkpoint substrate is available. Its installed documentation also states that nested `openclaw.invoke` calls are not currently reliable from the embedded Lobster runner. Therefore v0.23 still does not claim that Lobster can orchestrate the two way2AIPM tools or replace `WorkflowRun` as the domain workflow source of truth.
