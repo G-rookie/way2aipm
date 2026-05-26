@@ -1,6 +1,6 @@
 # OpenClaw Runtime Validation Adapter
 
-This directory contains the narrow local bridge intended for the `v0.23` OpenClaw feasibility test. It is not a full Runtime integration and does not grant an Agent direct access to `content/`.
+This directory contains the narrow Runtime boundary for the `v0.23` OpenClaw feasibility test. It includes the direct bridge client, an official OpenClaw Tool Plugin package, and a repeatable Gateway smoke test. It does not grant an Agent direct access to `content/`.
 
 ## Boundary
 
@@ -35,7 +35,61 @@ node integrations/openclaw/way2aipm-tool-client.mjs context <workflowRunId>
 node integrations/openclaw/way2aipm-tool-client.mjs propose <workflowRunId> <proposal.json>
 ```
 
-The bridge is designed to be wrapped as OpenClaw plugin tools after the isolated Runtime installation has been validated. Until then it remains a testable API boundary, not a claim that OpenClaw has been connected.
+## OpenClaw Tool Plugin
+
+The package at `integrations/openclaw/plugin/` uses OpenClaw's `defineToolPlugin` contract and exposes only two optional tools:
+
+| Tool | Behavior |
+| --- | --- |
+| `way2aipm_review_context` | Reads one review workflow context |
+| `way2aipm_propose_review_diagnosis` | Returns validated candidates with human approval required |
+
+Both tools must be explicitly allowlisted. Build and validate the package with:
+
+```powershell
+cd integrations/openclaw/plugin
+npm.cmd install
+npm.cmd run plugin:build
+npm.cmd run plugin:validate
+```
+
+Use an isolated OpenClaw configuration for local verification. Configure the plugin with an environment substitution rather than a literal secret:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "way2aipm-controlled-tools": {
+        "enabled": true,
+        "config": {
+          "apiToken": "${WAY2AIPM_AGENT_TOOL_TOKEN}",
+          "baseUrl": "http://127.0.0.1:4173"
+        }
+      }
+    }
+  },
+  "tools": {
+    "alsoAllow": [
+      "way2aipm_review_context",
+      "way2aipm_propose_review_diagnosis"
+    ]
+  }
+}
+```
+
+OpenClaw's install scanner rejects a plugin that reads an environment value directly and sends it over HTTP. For that reason, the plugin consumes validated plugin configuration while the Runtime config performs `${WAY2AIPM_AGENT_TOOL_TOKEN}` substitution.
+
+## Runtime Smoke Test
+
+After installing/linking the plugin into an isolated Runtime config, run:
+
+```powershell
+node integrations/openclaw/runtime-smoke-test.mjs
+```
+
+The process needs `OPENCLAW_ENTRY`, `OPENCLAW_HOME`, `OPENCLAW_STATE_DIR`, `OPENCLAW_CONFIG_PATH`, `OPENCLAW_GATEWAY_TOKEN`, and `WAY2AIPM_AGENT_TOOL_TOKEN` in its private environment. It starts temporary local services, calls both registered tools through OpenClaw `/tools/invoke`, asserts that the proposal remains approval-gated and causes no domain writes, then deletes only the records it created.
+
+The regular local app defaults to port `4173`. The smoke test defaults to app port `4355` and Gateway port `19123` to avoid an already running workbench, so its isolated plugin config must use `baseUrl: "http://127.0.0.1:4355"` (or a matching `WAY2AIPM_SMOKE_PORT` override).
 
 ## Runtime Safety Requirements
 
@@ -45,3 +99,7 @@ The bridge is designed to be wrapped as OpenClaw plugin tools after the isolated
 - Do not grant the Runtime arbitrary HTTP, shell, browser automation, or general-purpose file tools while it can access this local service.
 - Never grant an Agent direct filesystem write access to the project or `content/`.
 - Keep all domain writes and workflow completion inside the existing human-confirmed UI/API path.
+
+## Task Flow Boundary
+
+OpenClaw `2026.5.22` documents Lobster as the optional approval/resume tool, but it is a separately installable `@openclaw/lobster` plugin and is not present in the current isolated validation Runtime. Its documentation also states that nested `openclaw.invoke` calls are not currently reliable from the embedded Lobster runner. Therefore v0.23 validates controlled tool execution and the way2AIPM approval boundary; it does not claim a native Task Flow/Lobster orchestration integration.

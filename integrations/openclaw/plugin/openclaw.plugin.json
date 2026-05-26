@@ -1,0 +1,38 @@
+{
+  "id": "way2aipm-controlled-tools",
+  "name": "way2AIPM Controlled Tools",
+  "description": "Reads review workflow context and submits approval-gated diagnosis proposals.",
+  "version": "0.23.0",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "apiToken": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Adapter bearer token. Configure with ${WAY2AIPM_AGENT_TOOL_TOKEN} substitution."
+      },
+      "baseUrl": {
+        "type": "string",
+        "description": "Local way2AIPM service URL. Only loopback HTTP URLs are allowed."
+      }
+    },
+    "additionalProperties": false
+  },
+  "contracts": {
+    "tools": [
+      "way2aipm_review_context",
+      "way2aipm_propose_review_diagnosis"
+    ]
+  },
+  "toolMetadata": {
+    "way2aipm_review_context": {
+      "optional": true
+    },
+    "way2aipm_propose_review_diagnosis": {
+      "optional": true
+    }
+  }
+}
