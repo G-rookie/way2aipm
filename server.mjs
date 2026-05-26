@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import path from "node:path";
@@ -169,6 +170,7 @@ const WORKFLOW_STATUSES = new Set([
   "paused",
 ]);
 const WORKFLOW_WAITING_FOR = new Set(["human_action", "ai_generation", "training", "validation", "none"]);
+const AGENT_TOOL_ADAPTER_VERSION = "review_runtime_v1";
 
 const REVIEW_DIAGNOSIS_JSON_SCHEMA = {
   type: "object",
@@ -273,6 +275,26 @@ function notFound(res) {
 
 function methodNotAllowed(res) {
   sendJson(res, 405, { error: "Method not allowed" });
+}
+
+function agentToolRequestAuthorized(req, res) {
+  const expected = String(process.env.WAY2AIPM_AGENT_TOOL_TOKEN || "").trim();
+  if (!expected) {
+    sendJson(res, 503, { error: "Agent tool access is not configured" });
+    return false;
+  }
+  const authorization = String(req.headers.authorization || "");
+  const provided = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+  const expectedBuffer = Buffer.from(expected);
+  const providedBuffer = Buffer.from(provided);
+  if (
+    expectedBuffer.length !== providedBuffer.length ||
+    !timingSafeEqual(expectedBuffer, providedBuffer)
+  ) {
+    sendJson(res, 401, { error: "Unauthorized agent tool request" });
+    return false;
+  }
+  return true;
 }
 
 async function ensureContentDirs() {
@@ -3496,6 +3518,157 @@ function parseReviewDiagnosisCandidates(note, structuredResponse) {
   };
 }
 
+function agentToolManifest() {
+  return {
+    adapterVersion: AGENT_TOOL_ADAPTER_VERSION,
+    runtimeCandidate: "openclaw",
+    policy: {
+      storageAccess: "api_only",
+      directMarkdownWrite: false,
+      commitWriteToolsExposed: false,
+      approvalRequiredFor: ["create_weakness", "create_training_task", "complete_workflow"],
+      forbiddenRuntimeTools: ["arbitrary_http", "shell", "filesystem_write"],
+    },
+    tools: [
+      {
+        name: "get_workflow_review_context",
+        method: "GET",
+        pathTemplate: "/api/agent-tools/workflow-runs/{workflowRunId}/review-context",
+        permission: "read",
+      },
+      {
+        name: "propose_review_diagnosis",
+        method: "POST",
+        pathTemplate: "/api/agent-tools/review-diagnosis-proposals/validate",
+        permission: "propose_write",
+      },
+    ],
+  };
+}
+
+function agentWorkflowView(run) {
+  return {
+    id: run.id,
+    definitionKey: run.definitionKey,
+    title: run.title,
+    status: run.status,
+    currentStep: run.currentStep,
+    waitingFor: run.waitingFor,
+    opportunityId: run.opportunityId,
+    interviewRoundId: run.interviewRoundId,
+    reviewId: run.reviewId,
+    aiAnalysisNoteId: run.aiAnalysisNoteId,
+    weaknessIds: run.weaknessIds || [],
+    trainingTaskIds: run.trainingTaskIds || [],
+    updatedAt: run.updatedAt,
+  };
+}
+
+function agentReviewView(review) {
+  return {
+    id: review.id,
+    companyName: review.companyName,
+    roleTitle: review.roleTitle,
+    roundName: review.roundName,
+    actualQuestions: review.actualQuestions,
+    strongAnswers: review.strongAnswers,
+    weakAnswers: review.weakAnswers,
+    failurePoints: review.failurePoints,
+    interviewerSignals: review.interviewerSignals,
+    summary: review.summary,
+    selfRating: review.selfRating,
+    result: review.result,
+    status: review.status,
+  };
+}
+
+async function buildAgentReviewContext(workflowRunId) {
+  const run = await storage.getWorkflowRun(workflowRunId);
+  if (!run) throw new Error("Workflow run not found");
+  if (run.definitionKey !== "post_interview_repair_loop") {
+    throw new Error("Unsupported workflow definition");
+  }
+  const review = await storage.getReview(run.reviewId);
+  if (!review) throw new Error("Related interview review not found");
+  const analysis = await buildAiAnalysisContext({
+    analysisType: "review_diagnosis",
+    sourceType: "interview_review",
+    sourceId: review.id,
+  });
+
+  return {
+    adapterVersion: AGENT_TOOL_ADAPTER_VERSION,
+    tool: "get_workflow_review_context",
+    permission: "read",
+    workflowRun: agentWorkflowView(run),
+    interviewReview: agentReviewView(review),
+    diagnosisRequest: {
+      analysisType: "review_diagnosis",
+      sourceType: "interview_review",
+      sourceId: review.id,
+      sourceTitle: analysis.sourceTitle,
+      contextSnapshot: analysis.contextSnapshot,
+      promptDraft: analysis.promptDraft,
+      outputSchema: REVIEW_DIAGNOSIS_JSON_SCHEMA,
+    },
+    nextTool: {
+      name: "propose_review_diagnosis",
+      method: "POST",
+      path: "/api/agent-tools/review-diagnosis-proposals/validate",
+    },
+  };
+}
+
+async function validateAgentReviewDiagnosisProposal(input = {}) {
+  const workflowRunId = String(input.workflowRunId || "").trim();
+  if (!workflowRunId) throw new Error("workflowRunId is required");
+  const run = await storage.getWorkflowRun(workflowRunId);
+  if (!run) throw new Error("Workflow run not found");
+  if (["completed", "paused"].includes(run.status)) {
+    throw new Error("Workflow run is not accepting diagnosis proposals");
+  }
+  const review = await storage.getReview(run.reviewId);
+  if (!review) throw new Error("Related interview review not found");
+  const structuredResponse = typeof input.proposal === "object" && input.proposal !== null
+    ? JSON.stringify(input.proposal)
+    : String(input.structuredResponse || "");
+  const parsed = parseReviewDiagnosisCandidates(
+    {
+      analysisType: "review_diagnosis",
+      sourceType: "interview_review",
+      sourceId: review.id,
+      weaknessCandidates: [],
+      trainingTaskCandidates: [],
+    },
+    structuredResponse,
+  );
+
+  return {
+    adapterVersion: AGENT_TOOL_ADAPTER_VERSION,
+    tool: "propose_review_diagnosis",
+    permission: "propose_write",
+    workflowRunId: run.id,
+    reviewId: review.id,
+    candidateSchemaVersion: parsed.candidateSchemaVersion,
+    proposal: {
+      analysisSummary: parsed.analysisSummary,
+      failurePointCandidates: parsed.failurePointCandidates,
+      weaknessCandidates: parsed.weaknessCandidates,
+      trainingTaskCandidates: parsed.trainingTaskCandidates,
+    },
+    approval: {
+      status: "required",
+      waitingFor: "human_action",
+      commitWriteToolsExposed: false,
+      instruction: "请在 way2AIPM 工作台中人工确认候选，确认前不会写入缺陷或训练任务。",
+    },
+    persistence: {
+      written: false,
+      workflowAdvanced: false,
+    },
+  };
+}
+
 async function parseAiAnalysisCandidates(note, structuredResponse) {
   const parsed = parseReviewDiagnosisCandidates(note, structuredResponse);
   const nextNote = normalizeAiAnalysisNote(
@@ -4459,6 +4632,42 @@ async function handleApi(req, res, url) {
       try {
         const workflowRun = await updateWorkflowRunAction(existing, body);
         return sendJson(res, 200, { workflowRun });
+      } catch (error) {
+        return sendJson(res, 400, { error: error.message });
+      }
+    }
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/agent-tools/manifest") {
+    if (!agentToolRequestAuthorized(req, res)) return;
+    if (req.method === "GET") {
+      return sendJson(res, 200, agentToolManifest());
+    }
+    return methodNotAllowed(res);
+  }
+
+  const agentWorkflowContextMatch = url.pathname.match(/^\/api\/agent-tools\/workflow-runs\/([^/]+)\/review-context$/);
+  if (agentWorkflowContextMatch) {
+    if (!agentToolRequestAuthorized(req, res)) return;
+    if (req.method === "GET") {
+      try {
+        const context = await buildAgentReviewContext(decodeURIComponent(agentWorkflowContextMatch[1]));
+        return sendJson(res, 200, context);
+      } catch (error) {
+        return sendJson(res, 400, { error: error.message });
+      }
+    }
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/agent-tools/review-diagnosis-proposals/validate") {
+    if (!agentToolRequestAuthorized(req, res)) return;
+    if (req.method === "POST") {
+      try {
+        const body = await readRequestBody(req);
+        const result = await validateAgentReviewDiagnosisProposal(body);
+        return sendJson(res, 200, result);
       } catch (error) {
         return sendJson(res, 400, { error: error.message });
       }

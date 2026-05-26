@@ -1,0 +1,25 @@
+{
+  "summary": "候选诊断摘要，仅用于审批前验证。",
+  "failurePoints": [
+    "回答缺少结果指标与验证证据"
+  ],
+  "weaknessCandidates": [
+    {
+      "title": "量化表达不足",
+      "category": "communication",
+      "severity": "medium",
+      "evidence": "复盘中未给出指标变化",
+      "description": "回答能说明动作，但没有用数据解释结果。"
+    }
+  ],
+  "trainingTaskCandidates": [
+    {
+      "title": "重写结果指标回答",
+      "weaknessCandidateIndex": 0,
+      "taskType": "answer_rewrite",
+      "targetAbility": "用指标描述产品结果",
+      "practiceOutput": "一份带指标的 STAR 回答",
+      "acceptanceCriteria": "回答包含基线、变化结果和个人决策说明"
+    }
+  ]
+}
