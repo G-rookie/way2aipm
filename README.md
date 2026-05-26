@@ -45,7 +45,7 @@
 暂不实现登录、云同步、公开发布、删除能力和自动采纳 AI 建议。v0.22 支持从已保存复盘启动修复流程；AI 候选只有经人工采纳后才会写入缺陷或训练 Markdown，流程关闭也由用户确认。
 
 项目后续路线见 [Roadmap](docs/roadmap.zh.md)。
-Agent 与 Workflow 架构决策见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，已交付范围见 [v0.22 产品规格](docs/v0.22-product-spec.zh.md)。
+Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，Agent Runtime 选型决策见 [Agent Runtime 技术决策](docs/agent-runtime-decision.zh.md)，已交付范围见 [v0.22 产品规格](docs/v0.22-product-spec.zh.md)，下一步验证见 [v0.23 产品规格](docs/v0.23-product-spec.zh.md)。
 
 ## 版本状态
 

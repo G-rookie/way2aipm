@@ -11,6 +11,7 @@
 - Agent 负责需要推理、归纳、规划或工具选择的步骤。
 - AI 生成的是建议或动作提案；关键业务写入必须经人工确认。
 - v0.22 继续使用 Node 原生服务与 Markdown 存储，不引入 LangGraph 依赖。
+- v0.23 优先验证 OpenClaw 作为外部 Agent Runtime，Hermes 作为候选，LangGraph 作为条件性备选。
 
 ## 为什么先做 Workflow
 
@@ -53,12 +54,16 @@ Agent    = 在被授权步骤内分析上下文并提出下一步动作
 
 ```text
 UI Workbench
-  -> Workflow Runtime / Dispatcher
-      -> Approval Policy
-      -> Agent Tool Layer
-      -> Domain Services
-          -> Markdown Storage Adapter
-          -> AI Provider
+  -> Dispatcher / Domain Workflow Layer
+      -> Domain Services / Tool Adapter
+      -> WorkflowRun / Markdown Storage Adapter
+      -> AI Provider
+
+Agent Runtime Candidate (OpenClaw first)
+  -> Orchestrator Agent
+      -> Specialist Agents
+          -> Approval Policy
+          -> Domain Services / Tool Adapter
 ```
 
 ### Domain Services
@@ -76,9 +81,9 @@ UI Workbench
 
 领域记录是事实来源，不由 Agent 自由改写。
 
-### Workflow Runtime
+### Domain Workflow Layer
 
-负责：
+v0.22 已建立的 Workflow 层属于产品领域逻辑，不等同于后续可能采用的外部 Agent Runtime。它负责：
 
 - 建立和更新 `WorkflowRun`。
 - 接受事件并执行合法状态转移。
@@ -96,6 +101,19 @@ UI Workbench
 | Propose Write | 提议创建缺陷、训练任务、Brief 更新 | 只生成提案 |
 | Commit Write | 创建或修改真实业务记录 | 必须人工确认 |
 | Restricted | 删除记录、公开发布、发送外部消息 | 第一阶段不提供 |
+
+### Agent 角色设计
+
+OS 的子模块并不等于都要成为自主 Agent。首阶段只验证少量需要推理和委派的角色：
+
+| 角色 | 对应业务范围 | 是否首阶段验证 |
+| --- | --- | --- |
+| Orchestrator Agent | 总控调度，判断该进入哪项专项工作 | 是 |
+| Review Specialist Agent | 面试后复盘诊断、缺陷/训练候选提议 | 是 |
+| Preparation Specialist Agent | JD 拆解、问题预测、Brief 建议 | 后续 |
+| Training Specialist Agent | 训练路径与表达稳定建议 | 后续 |
+
+Pipeline、缺陷档案、训练任务、作品集和节奏记录仍是领域数据与交互模块，由 Agent 读取或提出建议，不由 Agent 自主拥有。
 
 ## 第一条 Workflow
 
@@ -172,7 +190,7 @@ content/workflow-runs/{id}.md
   "weaknessIds": [],
   "trainingTaskIds": [],
   "currentStep": "confirm_candidates",
-  "waitingFor": "human_approval",
+  "waitingFor": "human_action",
   "events": [
     {
       "type": "workflow_started",
@@ -233,28 +251,37 @@ v0.22 的目标是验证流程对象是否真正帮助日常使用，不做通�
 - 不自动从所有事件创建流程实例。
 - 不新增面试前 AI 生成能力。
 
-## 迁移到 LangGraph 的映射
+## Agent Runtime 集成方向
 
-轻量实现中的字段应能直接映射到未来 LangGraph 概念：
+v0.22 的轻量 Workflow 实现是产品事实层，而不是必须被框架替换的临时代码。下一阶段优先判断开源 Runtime 能否在它之上可靠执行 Agent 工作。
 
-| 当前抽象 | 后续 LangGraph 映射 |
-| --- | --- |
-| `WorkflowDefinition` | `StateGraph` 的节点与边 |
-| `WorkflowRun.id` | `thread_id` |
-| `status` / `currentStep` / 引用 ID | Graph State |
-| `events` | 状态历史或业务审计日志 |
-| `waitingFor: human_approval` | `interrupt()` |
-| 人工采纳动作 | 使用 `Command` 恢复执行 |
-| Markdown Run 存储 | 先保留业务审计；执行 checkpoint 可迁移到 SQLite saver |
+| 关注点 | 保留在 way2AIPM | Runtime 验证方向 |
+| --- | --- | --- |
+| 复盘、缺陷、训练等领域事实 | 是 | 仅经受控工具读取 |
+| `WorkflowRun` 业务状态与时间线 | 是 | 使用唯一 ID 关联执行 |
+| 子 Agent 委派与会话 | 否 | 优先验证 OpenClaw |
+| 持久化多步骤执行与审批暂停 | 业务结果仍保留 | 验证 OpenClaw `Task Flow` |
+| 长期记忆与 Skills 生态 | 尚未决定 | Hermes 作为候选对照 |
+| 深度定制图执行 | 当前不需要 | LangGraph 作为条件性备选 |
 
-引入 LangGraph 的条件：
+### OpenClaw 优先验证
 
-- 第一条流程已被真实使用并验证步骤合理。
-- 需要从等待人工审批处可靠恢复执行。
-- 出现多个并行运行实例或更复杂的条件分支。
-- 需要可回放的 checkpoint、失败恢复或工具执行追踪。
+OpenClaw 官方文档描述了多 Agent routing、sub-agents 和持久化 `Task Flow`，并支持在确定性执行中设置 approval gates。它与 `post_interview_repair_loop` 所需的调度、等待人工确认和恢复执行较为对应。
 
-届时本地场景优先评估 SQLite checkpointer，而不是立刻迁移全部业务 Markdown。
+验证时必须遵守：
+
+- Runtime 不直接修改 `content/` 下的 Markdown。
+- 专项 Agent 只获得只读与提案工具。
+- 审批后的真实写入继续通过 way2AIPM API 完成。
+- 显式配置 sandbox 与 tool allow/deny，不把 workspace 当作安全边界。
+
+### Hermes 候选与 LangGraph 备选
+
+Hermes Agent 官方提供工具集、子 Agent 委派、会话/记忆和 MCP/插件能力，适合作为长期个人 Agent 方向的候选。v0.23 不同时接入两个 Runtime，以免选型结论混杂。
+
+LangGraph 保留为条件性备选：当现成 Runtime 不能满足受控工具、状态关联、人工审批恢复或部署要求时，再评估自定义 graph、interrupt 与 checkpoint 实现。
+
+完整决策与验证标准见 [Agent Runtime 技术决策](agent-runtime-decision.zh.md) 和 [v0.23 产品规格](v0.23-product-spec.zh.md)。
 
 ## 后续 Workflow
 
@@ -269,6 +296,12 @@ v0.22 的目标是验证流程对象是否真正帮助日常使用，不做通�
 
 ## 参考
 
+- [OpenClaw GitHub](https://github.com/openclaw/openclaw)
+- [OpenClaw Multi-Agent Routing](https://docs.openclaw.ai/concepts/multi-agent)
+- [OpenClaw Sub-Agents](https://docs.openclaw.ai/tools/subagents)
+- [OpenClaw Task Flow](https://docs.openclaw.ai/automation/taskflow)
+- [Hermes Agent GitHub](https://github.com/NousResearch/hermes-agent)
+- [Hermes Agent Architecture](https://hermes-agent.nousresearch.com/docs/developer-guide/architecture)
 - [LangGraph Workflows and Agents](https://docs.langchain.com/oss/javascript/langgraph/workflows-agents)
 - [LangGraph Interrupts](https://docs.langchain.com/oss/javascript/langgraph/interrupts)
 - [LangGraph Persistence](https://docs.langchain.com/oss/javascript/langgraph/persistence)

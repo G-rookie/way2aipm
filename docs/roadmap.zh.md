@@ -38,9 +38,9 @@
 
 | 版本 | 优先级 | 主题 | 主要交付 |
 | --- | --- | --- | --- |
-| `v0.23` | P0 | Runtime 与 Agent Tool Layer | 事件推进、受控读/建议工具、状态同步、流程测试与导出 |
-| `v0.24` | P1 | LangGraph 试点 | 将已验证闭环映射到 graph、interrupt 与 checkpoint；评估 SQLite saver |
-| `v0.25` | P1 | 面试前 Agent Workflow | JD 拆解、隐含要求、问题预测、项目匹配与 Brief 建议 |
+| `v0.23` | P0 | OpenClaw Runtime 可行性验证 | 总控/复盘专项 Agent 实验；受控工具边界；安全与环境结论 |
+| `v0.24` | P0 | Task Flow 集成或候选转验 | 若通过则映射修复闭环、审批与状态同步；不通过则验证 Hermes 或 LangGraph |
+| `v0.25` | P1 | Runtime 决策与面试前 Agent | 确认采用路线后扩展 JD 拆解、问题预测、项目匹配与 Brief 建议 |
 | `v0.26` | P2 | 公开展示与 Next.js 试点 | 独立作品集展示面；脱敏模型；Next.js 架构验证 |
 | `v0.27+` | P3 | 发布级产品化 | 数据存储决策、登录、部署、云数据、权限与公开访问 |
 
@@ -68,11 +68,11 @@ AI 的推进已经从单点调用进入流程编排阶段。后续顺序调整�
   -> 人工采纳闭环
   -> 正式 API 接入
   -> Workflow 状态与审批编排
-  -> Agent 受控工具层
-  -> LangGraph 试点
+  -> OpenClaw Runtime 与受控工具层验证
+  -> Task Flow 集成或候选 Runtime 对照
   -> 更广泛的场景扩展
 ```
 
 ## 当前下一步
 
-`v0.23`：在已验证的面试后修复流程之上，实现受控 Runtime 与 Agent Tool Layer；暂不扩大自动写入权限。
+`v0.23`：在已验证的面试后修复流程之上，优先验证 OpenClaw Runtime、总控/复盘专项 Agent 与受控 Tool Adapter；保留 Hermes 和 LangGraph 为后续有条件对照方案。
