@@ -104,6 +104,22 @@ This check additionally needs `OPENCLAW_ENTRY`, `OPENCLAW_HOME`, `OPENCLAW_STATE
 
 `LOBSTER_STATE_DIR` is required for this smoke test and must stay under `tmp/openclaw-v023/`. Without it, Lobster defaults its resume state to the user's home directory. On success, the test receives `needs_approval`, resumes with approval, receives `ok`, and Lobster removes the completed resume state.
 
+## Agent Delegation Smoke Test
+
+The v0.24 experiment adds two workspace-guided agents under `integrations/openclaw/agents/` and uses a local deterministic OpenAI-compatible stub model to execute a true OpenClaw sub-agent run without a model credential:
+
+```powershell
+$env:OPENCLAW_ENTRY='C:\tmp\way2aipm-openclaw-v023\node_modules\openclaw\openclaw.mjs'
+node integrations/openclaw/agent-delegation-smoke-test.mjs
+```
+
+The script builds its isolated Runtime config in ignored `tmp/openclaw-v024/`, generates temporary local-only adapter and Gateway tokens unless supplied by environment, starts the local app, stub model and Gateway, delegates from `orchestrator` to `review_specialist`, and verifies that the proposal remains approval-gated with no domain writes. It also configures both experiment agents with `skills: []`.
+
+This experiment records two OpenClaw limitations rather than hiding them:
+
+- A native sub-agent inherits the parent agent's allowed tool boundary. The review specialist cannot receive the two way2AIPM tools unless the orchestrator's allow boundary also includes them, so strict role-level tool separation is not achieved.
+- Using `sessions_yield` for this parent/child completion path caused a parent session write-lock timeout in the local Runtime. The repeatable test submits the delegation asynchronously and waits externally for the specialist result.
+
 ## Runtime Safety Requirements
 
 - Use isolated `OPENCLAW_HOME`, `OPENCLAW_STATE_DIR`, and `OPENCLAW_CONFIG_PATH` paths for the experiment.
