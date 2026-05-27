@@ -251,6 +251,32 @@ const REVIEW_DIAGNOSIS_JSON_SCHEMA = {
   additionalProperties: false,
 };
 
+const PREPARATION_BRIEF_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    jdRequirements: { type: "string" },
+    hiddenExpectations: { type: "string" },
+    matchingEvidence: { type: "string" },
+    riskGaps: { type: "string" },
+    projectMapping: { type: "string" },
+    questionPredictions: { type: "string" },
+    highRiskQuestions: { type: "string" },
+    prepChecklist: { type: "string" },
+  },
+  required: [
+    "jdRequirements",
+    "hiddenExpectations",
+    "matchingEvidence",
+    "riskGaps",
+    "projectMapping",
+    "questionPredictions",
+    "highRiskQuestions",
+    "prepChecklist",
+  ],
+  additionalProperties: false,
+};
+const PREPARATION_BRIEF_FIELDS = Object.freeze(Object.keys(PREPARATION_BRIEF_JSON_SCHEMA.properties));
+
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -3189,6 +3215,24 @@ async function readWorkflowRuntimeSummary(workflowRunId, baseUrl) {
   return runtime.readReviewPilotSummary(graph, workflowRunId);
 }
 
+async function createPreparationRuntimeGraph() {
+  const [{ JsonFileCheckpointSaver }, runtime] = await Promise.all([
+    import("./integrations/langgraph/json-file-checkpoint-saver.mjs"),
+    import("./integrations/langgraph/preparation-pilot-graph.mjs"),
+  ]);
+  const graph = runtime.createPreparationPilotGraph({
+    checkpointer: new JsonFileCheckpointSaver(LANGGRAPH_CHECKPOINT_PATH),
+    preparationTools: Object.freeze({ generateForInterview: generatePreparationProposal }),
+    commitTools: Object.freeze({ applyDecisions: applyPreparationDecisions }),
+  });
+  return { graph, runtime };
+}
+
+async function readPreparationRuntimeSummary(interviewRoundId) {
+  const { graph, runtime } = await createPreparationRuntimeGraph();
+  return runtime.readPreparationPilotSummary(graph, interviewRoundId);
+}
+
 async function getExpressionDrillSource(sourceType, sourceId) {
   if (sourceType === "follow_up_question") return getFollowUpQuestion(sourceId);
   if (sourceType === "weakness") return getWeakness(sourceId);
@@ -3738,7 +3782,7 @@ function outputTextFromResponse(payload) {
   throw serviceError("模型未返回可解析的结构化结果，请稍后重试或使用手动粘贴流程", 502);
 }
 
-async function requestReviewDiagnosisFromOpenAi(promptDraft) {
+async function requestStructuredResponseFromOpenAi(promptDraft, schemaName, schema) {
   const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
   const model = String(process.env.OPENAI_MODEL || "").trim();
   if (!apiKey || !model) {
@@ -3758,9 +3802,9 @@ async function requestReviewDiagnosisFromOpenAi(promptDraft) {
         text: {
           format: {
             type: "json_schema",
-            name: "review_diagnosis_v1",
+            name: schemaName,
             strict: true,
-            schema: REVIEW_DIAGNOSIS_JSON_SCHEMA,
+            schema,
           },
         },
       }),
@@ -3779,6 +3823,10 @@ async function requestReviewDiagnosisFromOpenAi(promptDraft) {
   }
 
   return { model, structuredResponse: outputTextFromResponse(payload) };
+}
+
+async function requestReviewDiagnosisFromOpenAi(promptDraft) {
+  return requestStructuredResponseFromOpenAi(promptDraft, "review_diagnosis_v1", REVIEW_DIAGNOSIS_JSON_SCHEMA);
 }
 
 async function runAiReviewDiagnosis(note) {
@@ -3831,6 +3879,118 @@ async function runAiReviewDiagnosis(note) {
     }
     throw error;
   }
+}
+
+async function buildPreparationProposalContext(interviewRoundId) {
+  const interview = await getInterview(interviewRoundId);
+  if (!interview) throw new Error("Related interview not found");
+  const opportunity = await getOpportunity(interview.opportunityId);
+  if (!opportunity) throw new Error("Related opportunity not found");
+  const projectAmmos = (await listProjectAmmos({ status: "usable" })).slice(0, 6);
+  const projects = projectAmmos.length
+    ? projectAmmos
+        .map((ammo, index) => compactBlock(`项目弹药 ${index + 1}`, [
+          ["名称", ammo.projectName],
+          ["角色", ammo.role],
+          ["背景", ammo.background],
+          ["动作", ammo.actions],
+          ["结果", ammo.result],
+          ["指标", ammo.metrics],
+          ["AI 相关性", ammo.aiRelevance],
+          ["可证明能力", ammo.pmCompetencies],
+          ["风险追问", ammo.riskQuestions],
+        ]))
+        .join("\n\n")
+    : "项目弹药：暂无状态为可用于面试的项目素材。";
+  return {
+    interview,
+    opportunity,
+    projectAmmos,
+    contextSnapshot: `${compactBlock("岗位与面试轮次", [
+      ["公司", opportunity.companyName],
+      ["岗位", opportunity.roleTitle],
+      ["面试轮次", `${interview.roundName} / ${interview.roundType}`],
+      ["面试备注", interview.notes],
+      ["JD 原文", opportunity.jdText],
+      ["岗位笔记", opportunity.notes],
+    ])}\n\n${projects}`,
+  };
+}
+
+function preparationProposalPrompt(contextSnapshot) {
+  return `你是一名严谨的 AI 产品经理面试准备顾问。请根据以下本地材料，为面试前作战 Brief 提出建议。
+
+限制条件：
+- 只使用上下文中给出的事实，不编造公司、产品、业务或项目经历。
+- 本次没有外部公司调研能力，不输出未经材料支持的公司事实。
+- 对 JD 背后的判断必须在文字中标明“推断”。
+- 项目映射和匹配证据只能引用上下文中的项目弹药；如果不存在，指出需补充素材。
+- 高频问题和高风险问题要便于面试前练习。
+- 准备清单使用 Markdown checkbox，每项以 "- [ ] " 开头。
+
+上下文：
+${contextSnapshot}
+
+请按 schema 返回八个 Brief 建议字段。`;
+}
+
+async function generatePreparationProposal(interviewRoundId) {
+  const context = await buildPreparationProposalContext(interviewRoundId);
+  const result = await requestStructuredResponseFromOpenAi(
+    preparationProposalPrompt(context.contextSnapshot),
+    "preparation_brief_v1",
+    PREPARATION_BRIEF_JSON_SCHEMA,
+  );
+  let parsed;
+  try {
+    parsed = JSON.parse(result.structuredResponse);
+  } catch {
+    throw serviceError("模型返回的面试前建议无法解析，请稍后重试", 502);
+  }
+  const fields = Object.fromEntries(
+    PREPARATION_BRIEF_FIELDS.map((field) => [field, String(parsed?.[field] || "").trim()]),
+  );
+  if (!PREPARATION_BRIEF_FIELDS.some((field) => fields[field])) {
+    throw serviceError("模型未返回可用的 Brief 建议，请稍后重试", 502);
+  }
+  return {
+    fields,
+    generatedAt: new Date().toISOString(),
+    projectAmmoCount: context.projectAmmos.length,
+  };
+}
+
+async function applyPreparationDecisions(interviewRoundId, proposal, decisions) {
+  const interview = await getInterview(interviewRoundId);
+  if (!interview) throw new Error("Related interview not found");
+  const opportunity = await getOpportunity(interview.opportunityId);
+  if (!opportunity) throw new Error("Related opportunity not found");
+  const existing = (await listBriefs({ interviewRoundId }))[0] || null;
+  const acceptedFields = decisions.filter((decision) => decision.action === "accept").map((decision) => decision.field);
+  const keptFields = decisions.filter((decision) => decision.action === "keep").map((decision) => decision.field);
+  const updates = Object.fromEntries(
+    acceptedFields.map((field) => [field, String(proposal?.fields?.[field] || "")]),
+  );
+  const brief = normalizeBrief(
+    {
+      ...(existing || {}),
+      ...updates,
+      opportunityId: opportunity.id,
+      interviewRoundId: interview.id,
+      status: existing?.status || "draft",
+    },
+    existing || {},
+    opportunity,
+    interview,
+  );
+  await saveBrief(brief, opportunity, interview);
+  await syncInterviewPreparationStatus(interview, brief.status);
+  return {
+    briefId: brief.id,
+    created: !existing,
+    acceptedFields,
+    keptFields,
+  };
 }
 
 async function actOnAiCandidate(note, input) {
@@ -4052,6 +4212,69 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { interview });
     }
 
+    return methodNotAllowed(res);
+  }
+
+  const preparationRuntimeMatch = url.pathname.match(/^\/api\/interviews\/([^/]+)\/preparation-runtime$/);
+  if (preparationRuntimeMatch) {
+    const id = decodeURIComponent(preparationRuntimeMatch[1]);
+    if (req.method === "GET") {
+      const interview = await getInterview(id);
+      if (!interview) return notFound(res);
+      try {
+        return sendJson(res, 200, { runtime: await readPreparationRuntimeSummary(id) });
+      } catch (error) {
+        return sendJson(res, 503, { error: `Preparation Runtime 暂不可用：${error.message}` });
+      }
+    }
+    return methodNotAllowed(res);
+  }
+
+  const preparationRuntimeStartMatch = url.pathname.match(/^\/api\/interviews\/([^/]+)\/preparation-runtime\/start$/);
+  if (preparationRuntimeStartMatch) {
+    const id = decodeURIComponent(preparationRuntimeStartMatch[1]);
+    if (req.method === "POST") {
+      const interview = await getInterview(id);
+      if (!interview) return notFound(res);
+      try {
+        const { graph, runtime } = await createPreparationRuntimeGraph();
+        const existing = await runtime.readPreparationPilotSummary(graph, id);
+        if (["not_started", "running"].includes(existing.status)) {
+          await runtime.startPreparationPilot(graph, id);
+        }
+        return sendJson(res, 200, { runtime: await runtime.readPreparationPilotSummary(graph, id) });
+      } catch (error) {
+        return sendJson(res, error.statusCode || 400, { error: `准备建议生成失败：${error.message}` });
+      }
+    }
+    return methodNotAllowed(res);
+  }
+
+  const preparationRuntimeResumeMatch = url.pathname.match(/^\/api\/interviews\/([^/]+)\/preparation-runtime\/resume$/);
+  if (preparationRuntimeResumeMatch) {
+    const id = decodeURIComponent(preparationRuntimeResumeMatch[1]);
+    if (req.method === "POST") {
+      const interview = await getInterview(id);
+      if (!interview) return notFound(res);
+      const body = await readRequestBody(req);
+      try {
+        const { graph, runtime } = await createPreparationRuntimeGraph();
+        const existing = await runtime.readPreparationPilotSummary(graph, id);
+        if (existing.status === "completed") {
+          return sendJson(res, 200, { runtime: existing });
+        }
+        if (existing.status !== "waiting_for_approval") {
+          return sendJson(res, 400, { error: "当前 Preparation Runtime 没有等待审批的建议" });
+        }
+        await runtime.resumePreparationPilot(graph, id, {
+          action: String(body.action || ""),
+          decisions: Array.isArray(body.decisions) ? body.decisions : [],
+        });
+        return sendJson(res, 200, { runtime: await runtime.readPreparationPilotSummary(graph, id) });
+      } catch (error) {
+        return sendJson(res, 400, { error: `准备建议审批失败：${error.message}` });
+      }
+    }
     return methodNotAllowed(res);
   }
 

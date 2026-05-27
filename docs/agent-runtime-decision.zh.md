@@ -2,10 +2,10 @@
 
 ## 决策状态
 
-- 状态：`Controlled runtime integrated`，LangGraph 受控复盘闭环已接入 Workflow 页面并通过 API 烟测验证。
+- 状态：`Controlled specialist expansion integrated`，LangGraph 已承载复盘闭环与面试前建议两条受控页面流程。
 - 初始日期：`2026-05-26`；更新日期：`2026-05-27`。
-- 决策依据：`v0.23-v0.24` OpenClaw 验证、`v0.25` LangGraph 对照验证、`v0.26` 受控闭环试点与 `v0.27` 页面集成验证。
-- 影响范围：`v0.28+` Agent Runtime、工具权限、流程执行与未来技术选型。
+- 决策依据：`v0.23-v0.24` OpenClaw 验证、`v0.25-v0.27` LangGraph 复盘路径验证与 `v0.28` Preparation Specialist 验证。
+- 影响范围：`v0.29+` Agent Runtime、工具权限、流程执行与未来技术选型。
 
 ## 背景
 
@@ -23,7 +23,8 @@ v0.22 已实现 `WorkflowRun` 与面试后修复闭环。它记录真实业务�
 1. 保留 v0.22 的 `WorkflowRun`、领域数据与人工审批边界，它们属于 `way2AIPM OS` 的产品事实层。
 2. `v0.23-v0.24` 已完成 **OpenClaw** 验证：受控工具层可复用，但原生子 Agent 继承父级工具允许边界，不能作为本项目严格角色隔离的正式编排基础。
 3. `v0.25` 已完成 **LangGraph** 针对性对照验证：节点依赖注入实现严格工具隔离，`interrupt` / `Command({ resume })` 跑通审批前暂停与恢复，并保持领域记录零写入。
-4. `v0.26` 已通过磁盘 checkpoint、新 runner 恢复、现有诊断 API 调用与幂等采纳写回验证；`v0.27` 已将其接入 Workflow 页面，支持逐条审批与失败重试，仍不提前扩大到更多专项 Agent。
+4. `v0.26` 已通过磁盘 checkpoint、新 runner 恢复、现有诊断 API 调用与幂等采纳写回验证；`v0.27` 已将其接入 Workflow 页面，支持逐条审批与失败重试。
+5. `v0.28` 在相同边界下加入 `Preparation Specialist`：读取本地岗位与项目素材、提出 Brief 字段建议，人工审批后才更新准备材料。
 5. **OpenClaw** 的 Tool Plugin 与 Lobster 结果保留为协议/审批能力参考；**Hermes Agent** 保留为未来个人记忆与工具生态研究对象，不进入当前主线。
 
 ## 模块与 Agent 边界
@@ -117,7 +118,9 @@ v0.26 在该基础上以现有 `run-ai` 和 `candidate-actions` API 跑通命令
 
 v0.27 在 Workflow 页面提供启动和审批入口，并通过服务端 Runtime API 验证逐条决策、关联缺陷依赖校验、失败重试及已完成运行幂等读取。
 
-该结果满足扩展下一项受控 Agent 场景的核心要求，但不等同于生产发布。并发/部署级 checkpointer 与真实模型质量仍需继续验证。
+v0.28 将相同模式应用到面试前准备：独立 `preparation:{interviewRoundId}` 线程输出八项 Brief 建议，逐项采纳后才创建或更新 Markdown Brief，并保留已有内容。
+
+该结果说明专项 Agent 可在严格写回边界下扩展，但不等同于生产发布。并发/部署级 checkpointer、真实模型质量和公开场景下的脱敏策略仍需继续验证。
 
 ## 验证结果与试点范围
 
@@ -130,6 +133,7 @@ v0.27 在 Workflow 页面提供启动和审批入口，并通过服务端 Runtim
 - 通过 LangGraph 将一条 `post_interview_repair_loop` 候选路径与 `WorkflowRun.id` 线程对应，验证审批 interrupt/resume 和零业务写入。
 - 通过 LangGraph 试点 runner 调用现有正式诊断 API 路径，验证磁盘 checkpoint 恢复和批准后幂等写回。
 - 通过 Workflow 页面所依赖的 Runtime API 验证启动、状态查询、逐条审批、失败重试和幂等结果。
+- 通过面试前页面 Runtime API 验证建议生成、字段级审批、既有 Brief 保留与失败重试。
 
 试点阶段仍不做：
 

@@ -1,6 +1,6 @@
 # LangGraph 对照验证
 
-本目录包含 `v0.25` 的 Runtime 对照实验、`v0.26` 的受控复盘闭环试点，以及 `v0.27` 的页面 Runtime API 验证。
+本目录包含 `v0.25` 的 Runtime 对照实验、`v0.26` 的受控复盘闭环试点、`v0.27` 的复盘页面 Runtime API 验证，以及 `v0.28` 的面试前专项 Agent 验证。
 
 ## 安装
 
@@ -14,9 +14,10 @@ npm.cmd install --prefix D:\code\way2aipm\integrations\langgraph
 npm.cmd run smoke --prefix D:\code\way2aipm\integrations\langgraph
 npm.cmd run smoke:pilot --prefix D:\code\way2aipm\integrations\langgraph
 npm.cmd run smoke:runtime-api --prefix D:\code\way2aipm\integrations\langgraph
+npm.cmd run smoke:preparation-api --prefix D:\code\way2aipm\integrations\langgraph
 ```
 
-`smoke` 验证审批前的工具隔离与零领域写入；`smoke:pilot` 验证 Responses API 诊断路径、磁盘 checkpoint 恢复以及批准后的幂等写回；`smoke:runtime-api` 验证网页使用的启动、查询、逐条审批、依赖校验和失败重试接口。烟测会创建明确追踪的临时领域记录，并在结束时逐个清理。
+`smoke` 验证审批前的工具隔离与零领域写入；`smoke:pilot` 验证 Responses API 诊断路径、磁盘 checkpoint 恢复以及批准后的幂等写回；`smoke:runtime-api` 验证复盘网页使用的启动、查询、逐条审批、依赖校验和失败重试接口；`smoke:preparation-api` 验证面试前建议的逐项审批与 Brief 写回边界。烟测会创建明确追踪的临时领域记录，并在结束时逐个清理。
 
 ## 边界
 
@@ -25,6 +26,7 @@ npm.cmd run smoke:runtime-api --prefix D:\code\way2aipm\integrations\langgraph
 - `approval_gate` 使用 LangGraph `interrupt` 在人工采纳前暂停。
 - v0.25 对照测试使用 `MemorySaver`；v0.26 试点使用本地 JSON checkpoint 验证 runner 重启恢复。
 - v0.27 页面只通过服务端 Runtime API 提交显式逐条决定；审批前不会创建缺陷或训练任务。
+- v0.28 的 `Preparation Specialist` 只提出 Brief 字段建议；页面明确采纳后才创建或更新准备材料。
 
 ## 受控试点
 

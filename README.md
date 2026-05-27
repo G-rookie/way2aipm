@@ -2,7 +2,7 @@
 
 一个面向 AI PM 求职与成长的本地 Markdown 工作台。
 
-## 当前版本：v0.27
+## 当前版本：v0.28
 
 当前版本已经覆盖：
 
@@ -46,11 +46,12 @@
 - LangGraph 节点工具隔离与审批中断/恢复对照验证
 - LangGraph 持久 checkpoint 与受控复盘闭环试点
 - Workflow 页面内的 LangGraph Runtime 启动、逐条审批与失败重试
+- 面试前 Preparation Specialist 的 Brief 建议、逐项确认与受控写回
 
-暂不实现登录、云同步、公开发布、删除能力和自动采纳 AI 建议。v0.27 已将 LangGraph 受控复盘闭环接入 Workflow 页面：诊断在候选生成后暂停等待你逐条决定，只有明确采纳项会写入缺陷与训练任务；模型调用临时失败时可以从页面重试。
+暂不实现登录、云同步、公开发布、删除能力和自动采纳 AI 建议。v0.28 已在复盘闭环之外增加面试前专项 Agent：它根据本地 JD、轮次和项目弹药生成 Brief 建议，只有逐项确认采纳后才写入准备材料；没有外部公司调研或未经确认的内容覆盖。
 
 项目后续路线见 [Roadmap](docs/roadmap.zh.md)。
-Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，Agent Runtime 选型决策见 [Agent Runtime 技术决策](docs/agent-runtime-decision.zh.md)，对照实验见 [v0.23 OpenClaw 验证记录](docs/v0.23-openclaw-validation.zh.md)、[v0.24 OpenClaw Agent 验证记录](docs/v0.24-openclaw-agent-validation.zh.md)、[v0.25 LangGraph 验证记录](docs/v0.25-langgraph-validation.zh.md)、[v0.26 LangGraph 试点验证记录](docs/v0.26-langgraph-pilot-validation.zh.md) 与 [v0.27 Runtime 页面验证记录](docs/v0.27-langgraph-runtime-ui-validation.zh.md)。
+Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，Agent Runtime 选型决策见 [Agent Runtime 技术决策](docs/agent-runtime-decision.zh.md)，对照实验见 [v0.23 OpenClaw 验证记录](docs/v0.23-openclaw-validation.zh.md)、[v0.24 OpenClaw Agent 验证记录](docs/v0.24-openclaw-agent-validation.zh.md)、[v0.25 LangGraph 验证记录](docs/v0.25-langgraph-validation.zh.md)、[v0.26 LangGraph 试点验证记录](docs/v0.26-langgraph-pilot-validation.zh.md)、[v0.27 Runtime 页面验证记录](docs/v0.27-langgraph-runtime-ui-validation.zh.md) 与 [v0.28 Preparation Agent 验证记录](docs/v0.28-preparation-agent-validation.zh.md)。
 
 ## 版本状态
 
@@ -81,6 +82,7 @@ Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow
 - `v0.25`：LangGraph 节点工具隔离、interrupt/resume 审批与 WorkflowRun 线程映射验证
 - `v0.26`：LangGraph 磁盘 checkpoint、真实诊断 API 路径与批准后幂等写回试点
 - `v0.27`：Workflow 页面 Runtime 入口、候选逐条审批、依赖校验与失败重试
+- `v0.28`：面试前 Preparation Specialist、Brief 字段建议、逐项审批与受控写回
 
 ## 启动
 
@@ -127,7 +129,7 @@ OPENAI_MODEL=你要使用的模型_ID
 
 ## LangGraph Runtime
 
-v0.27 已在 Workflow 页面中提供受控诊断入口。进入一条修复流程后，点击“生成受控诊断”，页面会在候选生成后显示待审批状态；逐条选择采纳或忽略并提交后，才会将采纳项写入 Markdown 业务记录。
+v0.27 已在 Workflow 页面中提供受控复盘诊断入口。v0.28 在面试前作战室增加 Preparation Specialist：进入一轮面试后，可生成待确认的 Brief 字段建议，逐项选择采纳或保留后才写入 Markdown 业务记录。
 
 运行 checkpoint 默认保存在被 Git 忽略的 `runtime/langgraph/checkpoints.json`。如需为本地环境指定明确文件位置，可在 `.env.local` 设置：
 

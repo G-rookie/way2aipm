@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.27";
+const APP_VERSION = "v0.28";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -610,6 +610,8 @@ const state = {
   workflowRuns: [],
   workflowRuntimeById: {},
   workflowRuntimeDecisions: {},
+  preparationRuntimeByInterviewId: {},
+  preparationRuntimeDecisions: {},
   aiFrontierCards: [],
   rhythmLogs: [],
   systemSnapshot: null,
@@ -670,6 +672,9 @@ const state = {
   loadingWorkflowRuntimeId: null,
   startingWorkflowRuntime: false,
   resumingWorkflowRuntime: false,
+  loadingPreparationRuntimeId: null,
+  startingPreparationRuntime: false,
+  resumingPreparationRuntime: false,
   runningAiDiagnosis: false,
   parsingAiCandidates: false,
   actingAiCandidateId: null,
@@ -1907,6 +1912,94 @@ async function resumeSelectedWorkflowRuntime() {
   }
 }
 
+async function loadPreparationRuntime(interviewRoundId) {
+  if (!interviewRoundId || state.loadingPreparationRuntimeId === interviewRoundId) return;
+  state.loadingPreparationRuntimeId = interviewRoundId;
+  render();
+  try {
+    const result = await api(`/api/interviews/${encodeURIComponent(interviewRoundId)}/preparation-runtime`);
+    state.preparationRuntimeByInterviewId[interviewRoundId] = result.runtime;
+    if (result.runtime.status !== "waiting_for_approval") {
+      state.preparationRuntimeDecisions[interviewRoundId] = {};
+    }
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    if (state.loadingPreparationRuntimeId === interviewRoundId) state.loadingPreparationRuntimeId = null;
+    render();
+  }
+}
+
+async function startSelectedPreparationRuntime() {
+  const interview = selectedInterview();
+  if (!interview || state.startingPreparationRuntime) return;
+  state.startingPreparationRuntime = true;
+  render();
+  try {
+    const result = await api(`/api/interviews/${encodeURIComponent(interview.id)}/preparation-runtime/start`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    state.preparationRuntimeByInterviewId[interview.id] = result.runtime;
+    state.preparationRuntimeDecisions[interview.id] = {};
+    showToast("面试前建议已生成，请逐项确认");
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    state.startingPreparationRuntime = false;
+    render();
+  }
+}
+
+function setPreparationRuntimeDecision(control) {
+  const interview = selectedInterview();
+  if (!interview) return;
+  state.preparationRuntimeDecisions[interview.id] = {
+    ...(state.preparationRuntimeDecisions[interview.id] || {}),
+    [control.dataset.preparationField]: control.value,
+  };
+  render();
+}
+
+async function resumeSelectedPreparationRuntime() {
+  const interview = selectedInterview();
+  const runtime = interview ? state.preparationRuntimeByInterviewId[interview.id] : null;
+  if (!interview || runtime?.status !== "waiting_for_approval" || state.resumingPreparationRuntime) return;
+  const selected = state.preparationRuntimeDecisions[interview.id] || {};
+  const decisions = Object.keys(runtime.proposal?.fields || {}).map((field) => ({
+    field,
+    action: selected[field] || "",
+  }));
+  if (decisions.some((decision) => !decision.action)) {
+    showInfo("请先为每项 Brief 建议选择采纳或保留");
+    return;
+  }
+  state.resumingPreparationRuntime = true;
+  render();
+  try {
+    const result = await api(`/api/interviews/${encodeURIComponent(interview.id)}/preparation-runtime/resume`, {
+      method: "POST",
+      body: JSON.stringify({ action: "commit", decisions }),
+    });
+    state.preparationRuntimeByInterviewId[interview.id] = result.runtime;
+    state.preparationRuntimeDecisions[interview.id] = {};
+    const [briefList, interviewList] = await Promise.all([
+      api("/api/pre-interview-briefs"),
+      api("/api/interviews"),
+    ]);
+    state.briefs = briefList.briefs || [];
+    state.interviews = interviewList.interviews || [];
+    state.selectedBriefId = briefForInterview(interview.id)?.id || null;
+    state.briefDraft = null;
+    showToast("已将采纳建议写入作战 Brief");
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    state.resumingPreparationRuntime = false;
+    render();
+  }
+}
+
 async function startWorkflowFromSelectedReview() {
   const review = selectedReview();
   if (!review?.id || state.reviewDraft) {
@@ -2039,6 +2132,9 @@ function selectInterviewForBrief(id) {
   state.selectedBriefId = briefForInterview(id)?.id || null;
   state.selectedReviewId = reviewForInterview(id)?.id || null;
   render();
+  if (state.activeModule === "preInterview") {
+    loadPreparationRuntime(id);
+  }
 }
 
 function openReviewForInterview(id) {
@@ -2150,6 +2246,7 @@ function openPreInterviewForInterview(id) {
   selectInterviewForBrief(id);
   state.activeModule = "preInterview";
   render();
+  loadPreparationRuntime(id);
 }
 
 function beginBriefForSelectedInterview() {
@@ -2190,6 +2287,9 @@ function switchModule(module) {
   render();
   if (module === "workflow" && state.selectedWorkflowRunId) {
     loadWorkflowRuntime(state.selectedWorkflowRunId);
+  }
+  if (module === "preInterview" && state.selectedInterviewId) {
+    loadPreparationRuntime(state.selectedInterviewId);
   }
 }
 
@@ -3604,6 +3704,14 @@ function attachCommonEvents() {
     selectInterviewForBrief(event.target.value);
   });
   document.querySelector("#create-brief-btn")?.addEventListener("click", beginBriefForSelectedInterview);
+  document.querySelector("#start-preparation-runtime-btn")?.addEventListener("click", startSelectedPreparationRuntime);
+  document.querySelector("#resume-preparation-runtime-btn")?.addEventListener("click", resumeSelectedPreparationRuntime);
+  document.querySelectorAll("[data-preparation-runtime-refresh]").forEach((button) => {
+    button.addEventListener("click", () => loadPreparationRuntime(button.dataset.preparationRuntimeRefresh));
+  });
+  document.querySelectorAll("[data-preparation-field]").forEach((control) => {
+    control.addEventListener("change", () => setPreparationRuntimeDecision(control));
+  });
   document.querySelector("#create-review-btn")?.addEventListener("click", beginReviewForSelectedInterview);
   document.querySelector("#create-weakness-from-review-btn")?.addEventListener("click", beginWeaknessFromSelectedReview);
   document.querySelector("#create-ai-diagnosis-from-review-btn")?.addEventListener("click", beginAiDiagnosisFromSelectedReview);
@@ -5422,6 +5530,94 @@ function renderBriefField(name, label, value, placeholder = "") {
   `;
 }
 
+function renderPreparationRuntime(interview, brief) {
+  const runtime = state.preparationRuntimeByInterviewId[interview.id];
+  const loading = state.loadingPreparationRuntimeId === interview.id;
+  const fieldLabels = {
+    jdRequirements: "JD 拆解",
+    hiddenExpectations: "隐性期待",
+    matchingEvidence: "匹配证据",
+    riskGaps: "风险缺口",
+    projectMapping: "项目映射",
+    questionPredictions: "高频问题预测",
+    highRiskQuestions: "高风险问题",
+    prepChecklist: "准备清单",
+  };
+  if (!runtime) {
+    return `
+      <section class="preparation-runtime">
+        <div class="runtime-heading">
+          <h3>Preparation Specialist</h3>
+          <button class="btn compact" type="button" data-preparation-runtime-refresh="${escapeHtml(interview.id)}"${disabledAttr(loading)}>${loading ? "读取中..." : "读取状态"}</button>
+        </div>
+        <p class="mini-meta">读取后可基于岗位 JD 与项目弹药生成面试前建议。</p>
+      </section>
+    `;
+  }
+  if (runtime.status === "not_started" || runtime.status === "running") {
+    return `
+      <section class="preparation-runtime">
+        <div class="runtime-heading">
+          <h3>Preparation Specialist</h3>
+          <span class="tag candidate-pending">${runtime.status === "running" ? "等待重试" : "尚未启动"}</span>
+        </div>
+        <p class="mini-meta">${runtime.status === "running" ? "上一次生成未完成，可以重新尝试。" : "Agent 仅提出 Brief 建议，你确认之前不会写入准备材料。"}</p>
+        <div class="actions candidate-actions">
+          <button class="btn primary" id="start-preparation-runtime-btn" type="button"${disabledAttr(state.startingPreparationRuntime)}>${state.startingPreparationRuntime ? "生成中..." : "生成准备建议"}</button>
+          <button class="btn" type="button" data-preparation-runtime-refresh="${escapeHtml(interview.id)}"${disabledAttr(loading)}>刷新状态</button>
+        </div>
+      </section>
+    `;
+  }
+  if (runtime.status === "completed") {
+    const result = runtime.commitResult || {};
+    return `
+      <section class="preparation-runtime">
+        <div class="runtime-heading">
+          <h3>Preparation Specialist</h3>
+          <span class="tag candidate-accepted">${runtime.decision === "defer" ? "已暂缓" : "已应用"}</span>
+        </div>
+        <p class="mini-meta">${result.created ? "已建立草稿 Brief。" : "已更新当前 Brief。"} 采纳 ${result.acceptedFields?.length || 0} 项，保留 ${result.keptFields?.length || 0} 项。</p>
+      </section>
+    `;
+  }
+  const selected = state.preparationRuntimeDecisions[interview.id] || {};
+  const fields = Object.entries(runtime.proposal?.fields || {});
+  const chosen = fields.filter(([field]) => selected[field]).length;
+  return `
+    <section class="preparation-runtime">
+      <div class="runtime-heading">
+        <h3>Preparation Specialist</h3>
+        <span class="tag workflow-candidate_confirmation">等待你的确认</span>
+      </div>
+      <p class="mini-meta">建议来自当前岗位、面试轮次与 ${runtime.proposal?.projectAmmoCount || 0} 份可用项目素材。逐项选择后才会写入 Brief。</p>
+      <div class="preparation-suggestion-grid">
+        ${fields.map(([field, value]) => `
+          <article class="candidate-card">
+            <div class="candidate-head">
+              <strong>${escapeHtml(fieldLabels[field] || field)}</strong>
+              <span class="tag candidate-pending">建议</span>
+            </div>
+            <p>${escapeHtml(value || "暂无建议")}</p>
+            <select class="runtime-decision-select" data-preparation-field="${escapeHtml(field)}" aria-label="选择字段处理方式">
+              <option value=""${selected[field] ? "" : " selected"}>请选择处理方式</option>
+              <option value="accept"${selected[field] === "accept" ? " selected" : ""}>采纳建议</option>
+              <option value="keep"${selected[field] === "keep" ? " selected" : ""}>保留${brief ? "现有内容" : "空白"}</option>
+            </select>
+          </article>
+        `).join("")}
+      </div>
+      <div class="runtime-approval-footer">
+        <p class="mini-meta">已选择 ${chosen} / ${fields.length} 项。</p>
+        <div class="actions candidate-actions">
+          <button class="btn" type="button" data-preparation-runtime-refresh="${escapeHtml(interview.id)}"${disabledAttr(loading || state.resumingPreparationRuntime)}>刷新状态</button>
+          <button class="btn primary" id="resume-preparation-runtime-btn" type="button"${disabledAttr(chosen !== fields.length || state.resumingPreparationRuntime)}>${state.resumingPreparationRuntime ? "提交中..." : "应用所选建议"}</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderBriefForm(interview) {
   const brief = selectedBrief();
   const opportunity = state.opportunities.find((item) => item.id === interview?.opportunityId);
@@ -5442,7 +5638,8 @@ function renderBriefForm(interview) {
           <button class="btn primary" id="create-brief-btn" type="button">创建 Brief</button>
         </div>
         <div class="panel-body">
-          <div class="empty">创建后可以填写公司调研、JD 拆解、项目映射、高风险问题和准备清单。</div>
+          ${renderPreparationRuntime(interview, null)}
+          <div class="empty">也可以手动创建后填写公司调研、JD 拆解、项目映射、高风险问题和准备清单。</div>
         </div>
       </section>
     `;
@@ -5460,6 +5657,7 @@ function renderBriefForm(interview) {
         </div>
       </div>
       <div class="panel-body">
+        ${renderPreparationRuntime(interview, brief)}
         ${renderBriefWarRoom(brief)}
         <form id="brief-form" class="form-grid brief-form">
           <div class="form-field">

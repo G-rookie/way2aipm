@@ -11,7 +11,7 @@
 - Agent 负责需要推理、归纳、规划或工具选择的步骤。
 - AI 生成的是建议或动作提案；关键业务写入必须经人工确认。
 - v0.22 继续使用 Node 原生服务与 Markdown 存储，不引入 LangGraph 依赖。
-- v0.23-v0.24 已验证 OpenClaw 工具边界与子 Agent 限制；v0.25-v0.27 已验证 LangGraph 的受控复盘闭环、持久审批恢复与页面入口。
+- v0.23-v0.24 已验证 OpenClaw 工具边界与子 Agent 限制；v0.25-v0.28 已验证 LangGraph 的受控复盘闭环、面试前建议与页面审批入口。
 
 ## 为什么先做 Workflow
 
@@ -122,6 +122,12 @@ v0.27 页面集成补充：
 - 页面在 interrupt 状态逐条提交采纳或忽略决定，训练任务采纳必须依赖被采纳的关联缺陷。
 - 模型调用临时失败时保留可重试入口；审批前仍不存在缺陷或训练任务写入。
 
+v0.28 面试前专项补充：
+
+- `preparation_specialist` 读取本地岗位 JD、面试轮次与可用项目弹药，输出八项结构化 Brief 建议。
+- `approval_gate` 在字段写入前暂停；页面为每项选择采纳或保留既有内容。
+- `approval_commit` 仅将采纳字段合入 `PreInterviewBrief`，不做外部公司搜索、不自动标记准备完成。
+
 ### Agent 角色设计
 
 OS 的子模块并不等于都要成为自主 Agent。首阶段只验证少量需要推理和委派的角色：
@@ -130,7 +136,7 @@ OS 的子模块并不等于都要成为自主 Agent。首阶段只验证少量�
 | --- | --- | --- |
 | Orchestrator Agent | 总控调度，判断该进入哪项专项工作 | 是 |
 | Review Specialist Agent | 面试后复盘诊断、缺陷/训练候选提议 | 是 |
-| Preparation Specialist Agent | JD 拆解、问题预测、Brief 建议 | 后续 |
+| Preparation Specialist Agent | JD 拆解、问题预测、Brief 建议 | 是 |
 | Training Specialist Agent | 训练路径与表达稳定建议 | 后续 |
 
 Pipeline、缺陷档案、训练任务、作品集和节奏记录仍是领域数据与交互模块，由 Agent 读取或提出建议，不由 Agent 自主拥有。
@@ -273,7 +279,7 @@ v0.22 的目标是验证流程对象是否真正帮助日常使用，不做通�
 
 ## Agent Runtime 集成方向
 
-v0.22 的轻量 Workflow 实现是产品事实层，而不是必须被框架替换的临时代码。v0.23-v0.27 的验证已确认 LangGraph 可以在它之上承担受控执行编排并接入现有页面。
+v0.22 的轻量 Workflow 实现是产品事实层，而不是必须被框架替换的临时代码。v0.23-v0.28 的验证已确认 LangGraph 可以在它之上承担受控执行编排并接入现有页面。
 
 | 关注点 | 保留在 way2AIPM | Runtime 验证方向 |
 | --- | --- | --- |
@@ -286,7 +292,7 @@ v0.22 的轻量 Workflow 实现是产品事实层，而不是必须被框架替�
 
 ### LangGraph 受控闭环主线
 
-v0.25-v0.27 已验证 `post_interview_repair_loop` 的节点能力隔离、人工审批暂停、磁盘 checkpoint 恢复、批准后幂等写入和 Workflow 页面逐条审批。当前主线可进入下一项受控专项 Agent，而不是扩大自主写入权限。
+v0.25-v0.27 已验证 `post_interview_repair_loop` 的节点能力隔离、人工审批暂停、磁盘 checkpoint 恢复、批准后幂等写入和 Workflow 页面逐条审批。v0.28 进一步验证 `Preparation Specialist` 只在人工选择后更新 Brief。当前主线可进入公开展示与迁移验证，而不是扩大自主写入权限。
 
 继续遵守：
 
@@ -302,7 +308,7 @@ OpenClaw 的受控 Tool Plugin 与 Lobster 审批验证结果可作为协议和�
 
 Hermes Agent 官方提供工具集、子 Agent 委派、会话/记忆和 MCP/插件能力，仍适合作为未来长期个人 Agent 与记忆生态的候选；当前不并行产品化。
 
-完整决策与验证标准见 [Agent Runtime 技术决策](agent-runtime-decision.zh.md)、[v0.25 验证记录](v0.25-langgraph-validation.zh.md)、[v0.26 验证记录](v0.26-langgraph-pilot-validation.zh.md) 和 [v0.27 验证记录](v0.27-langgraph-runtime-ui-validation.zh.md)。
+完整决策与验证标准见 [Agent Runtime 技术决策](agent-runtime-decision.zh.md)、[v0.25 验证记录](v0.25-langgraph-validation.zh.md)、[v0.26 验证记录](v0.26-langgraph-pilot-validation.zh.md)、[v0.27 验证记录](v0.27-langgraph-runtime-ui-validation.zh.md) 和 [v0.28 验证记录](v0.28-preparation-agent-validation.zh.md)。
 
 ## 后续 Workflow
 
