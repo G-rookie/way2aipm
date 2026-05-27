@@ -3283,6 +3283,59 @@ async function portfolioPreviewData() {
   };
 }
 
+function publicPortfolioTags(value) {
+  return String(value || "")
+    .split(/[、,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
+function projectForPublicPortfolio(project) {
+  return {
+    displayTitle: String(project.displayTitle || ""),
+    subtitle: String(project.subtitle || ""),
+    role: String(project.role || ""),
+    period: String(project.period || ""),
+    summary: String(project.summary || ""),
+    problem: String(project.problem || ""),
+    solution: String(project.solution || ""),
+    impact: String(project.impact || ""),
+    metrics: String(project.metrics || ""),
+    skills: publicPortfolioTags(project.skills),
+  };
+}
+
+async function publicPortfolioData() {
+  const profile = await getPortfolioProfile();
+  if (profile.portfolioStatus !== "published_ready") {
+    return {
+      contractVersion: "public_portfolio_v1",
+      published: false,
+      profile: null,
+      projects: [],
+      stats: { publishedProjects: 0 },
+    };
+  }
+
+  const projects = await listPortfolioProjects({ visibility: "portfolio", readiness: "ready" });
+  return {
+    contractVersion: "public_portfolio_v1",
+    published: true,
+    profile: {
+      displayName: profile.displayName,
+      headline: profile.headline,
+      targetRole: profile.targetRole,
+      location: profile.location,
+      summary: profile.summary,
+      coreSkills: publicPortfolioTags(profile.coreSkills),
+      contactNote: profile.contactNote,
+    },
+    projects: projects.map(projectForPublicPortfolio),
+    stats: { publishedProjects: projects.length },
+  };
+}
+
 function compactBlock(title, entries) {
   const lines = entries
     .filter(([, value]) => String(value ?? "").trim())
@@ -4766,6 +4819,14 @@ async function handleApi(req, res, url) {
   if (url.pathname === "/api/portfolio-preview") {
     if (req.method === "GET") {
       return sendJson(res, 200, await portfolioPreviewData());
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/public-portfolio") {
+    if (req.method === "GET") {
+      return sendJson(res, 200, await publicPortfolioData());
     }
 
     return methodNotAllowed(res);

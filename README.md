@@ -2,7 +2,7 @@
 
 一个面向 AI PM 求职与成长的本地 Markdown 工作台。
 
-## 当前版本：v0.28
+## 当前版本：v0.29
 
 当前版本已经覆盖：
 
@@ -26,6 +26,7 @@
 - 表达练习记录
 - 作品集产品线
 - 本地作品集预览
+- 脱敏公开作品集 API 与独立展示页
 - AI 辅助分析工作台
 - AI 结构化候选与人工确认
 - AI 面试复盘正式模型调用
@@ -48,10 +49,10 @@
 - Workflow 页面内的 LangGraph Runtime 启动、逐条审批与失败重试
 - 面试前 Preparation Specialist 的 Brief 建议、逐项确认与受控写回
 
-暂不实现登录、云同步、公开发布、删除能力和自动采纳 AI 建议。v0.28 已在复盘闭环之外增加面试前专项 Agent：它根据本地 JD、轮次和项目弹药生成 Brief 建议，只有逐项确认采纳后才写入准备材料；没有外部公司调研或未经确认的内容覆盖。
+暂不实现登录、云同步、公网部署、删除能力和自动采纳 AI 建议。v0.29 已为作品集建立只读公开边界：资料需明确允许公开，项目需完成脱敏并进入展示区，独立页面才会读取白名单字段；当前仍在本地运行，不代表已经发布到互联网。
 
 项目后续路线见 [Roadmap](docs/roadmap.zh.md)。
-Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，Agent Runtime 选型决策见 [Agent Runtime 技术决策](docs/agent-runtime-decision.zh.md)，对照实验见 [v0.23 OpenClaw 验证记录](docs/v0.23-openclaw-validation.zh.md)、[v0.24 OpenClaw Agent 验证记录](docs/v0.24-openclaw-agent-validation.zh.md)、[v0.25 LangGraph 验证记录](docs/v0.25-langgraph-validation.zh.md)、[v0.26 LangGraph 试点验证记录](docs/v0.26-langgraph-pilot-validation.zh.md)、[v0.27 Runtime 页面验证记录](docs/v0.27-langgraph-runtime-ui-validation.zh.md) 与 [v0.28 Preparation Agent 验证记录](docs/v0.28-preparation-agent-validation.zh.md)。
+Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，Agent Runtime 选型决策见 [Agent Runtime 技术决策](docs/agent-runtime-decision.zh.md)，对照实验见 [v0.23 OpenClaw 验证记录](docs/v0.23-openclaw-validation.zh.md)、[v0.24 OpenClaw Agent 验证记录](docs/v0.24-openclaw-agent-validation.zh.md)、[v0.25 LangGraph 验证记录](docs/v0.25-langgraph-validation.zh.md)、[v0.26 LangGraph 试点验证记录](docs/v0.26-langgraph-pilot-validation.zh.md)、[v0.27 Runtime 页面验证记录](docs/v0.27-langgraph-runtime-ui-validation.zh.md)、[v0.28 Preparation Agent 验证记录](docs/v0.28-preparation-agent-validation.zh.md) 与 [v0.29 公开作品集验证记录](docs/v0.29-public-portfolio-validation.zh.md)。
 
 ## 版本状态
 
@@ -83,6 +84,7 @@ Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow
 - `v0.26`：LangGraph 磁盘 checkpoint、真实诊断 API 路径与批准后幂等写回试点
 - `v0.27`：Workflow 页面 Runtime 入口、候选逐条审批、依赖校验与失败重试
 - `v0.28`：面试前 Preparation Specialist、Brief 字段建议、逐项审批与受控写回
+- `v0.29`：作品集发布门禁、脱敏只读公开契约、独立展示页与 Next.js 迁移边界
 
 ## 启动
 
@@ -94,6 +96,12 @@ node server.mjs
 
 ```text
 http://localhost:4173
+```
+
+作品集资料明确允许公开后，可在本地查看独立公开展示面：
+
+```text
+http://localhost:4173/showcase.html
 ```
 
 如果需要换端口，可在本地 `.env.local` 中增加配置后重启服务：

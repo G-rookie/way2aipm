@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.28";
+const APP_VERSION = "v0.29";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -198,7 +198,7 @@ const PORTFOLIO_STATUSES = [
   ["draft", "草稿"],
   ["reviewing", "整理中"],
   ["ready", "可预览"],
-  ["published_ready", "具备公开准备"],
+  ["published_ready", "允许公开展示"],
 ];
 
 const PORTFOLIO_VISIBILITIES = [
@@ -5410,7 +5410,7 @@ function renderDashboard() {
         <div class="panel-header">
           <div>
             <h2 class="panel-title">作品集准备</h2>
-            <p class="panel-subtitle">未来公开展示前的项目卡和发布状态。</p>
+            <p class="panel-subtitle">公开展示前的项目卡与发布门禁状态。</p>
           </div>
         </div>
         <div class="panel-body">
@@ -7162,7 +7162,7 @@ function renderPortfolio() {
   const data = portfolioMetrics();
 
   return `
-    ${renderTopbar("作品集产品线", "把成熟项目弹药整理成未来可公开展示的作品集素材。", "08 Portfolio Line")}
+    ${renderTopbar("作品集产品线", "整理脱敏项目，并通过独立公开页查看真正可展示的结果。", "08 Portfolio Line")}
     <section class="grid metrics compact-metrics">
       <div class="metric"><div class="metric-label">项目卡总数</div><div class="metric-value">${data.total}</div></div>
       <div class="metric"><div class="metric-label">进入预览</div><div class="metric-value">${data.inPreview}</div></div>
@@ -7170,7 +7170,8 @@ function renderPortfolio() {
       <div class="metric"><div class="metric-label">待处理</div><div class="metric-value">${data.needsWork}</div></div>
     </section>
     <div class="actions page-actions">
-      <button class="btn primary" id="portfolio-preview-toggle" type="button">${state.portfolioPreviewMode ? "返回工作台" : "本地预览"}</button>
+      <a class="btn btn-link" href="/showcase.html" target="_blank" rel="noopener">公开展示页</a>
+      <button class="btn primary" id="portfolio-preview-toggle" type="button">${state.portfolioPreviewMode ? "返回工作台" : "内部预览"}</button>
     </div>
     ${state.portfolioPreviewMode ? renderPortfolioPreview() : renderPortfolioWorkspace()}
   `;
@@ -7183,7 +7184,7 @@ function renderPortfolioWorkspace() {
         <div class="panel-header">
           <div>
             <h2 class="panel-title">作品集资料</h2>
-            <p class="panel-subtitle">先把个人定位、核心能力和发布检查清单整理清楚。</p>
+            <p class="panel-subtitle">整理个人定位与发布检查清单，公开状态决定外部页面是否可见。</p>
           </div>
         </div>
         <div class="panel-body stack">

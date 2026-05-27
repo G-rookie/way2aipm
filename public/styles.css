@@ -245,6 +245,12 @@ h1 {
   background: transparent;
 }
 
+.btn-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
 .grid {
   display: grid;
   gap: 14px;
