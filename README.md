@@ -2,7 +2,7 @@
 
 一个面向 AI PM 求职与成长的本地 Markdown 工作台。
 
-## 当前版本：v0.25
+## 当前版本：v0.26
 
 当前版本已经覆盖：
 
@@ -44,11 +44,12 @@
 - OpenClaw 受控 Tool Plugin 与审批底座验证
 - 总控/复盘专项 Agent 委派实验与 Runtime 限制结论
 - LangGraph 节点工具隔离与审批中断/恢复对照验证
+- LangGraph 持久 checkpoint 与受控复盘闭环试点
 
-暂不实现登录、云同步、公开发布、删除能力和自动采纳 AI 建议。v0.25 已验证 LangGraph 节点可按职责隔离工具，并能在审批前中断及恢复；当前只将其确定为受控复盘闭环试点方向，AI 候选仍只有经人工采纳后才会写入缺陷或训练 Markdown。
+暂不实现登录、云同步、公开发布、删除能力和自动采纳 AI 建议。v0.26 已验证 LangGraph 可持久等待审批、从新 runner 恢复，并仅在明确批准后复用现有接口写入缺陷与训练任务；当前试点仍通过命令行运行，页面入口留到后续版本。
 
 项目后续路线见 [Roadmap](docs/roadmap.zh.md)。
-Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，Agent Runtime 选型决策见 [Agent Runtime 技术决策](docs/agent-runtime-decision.zh.md)，对照实验见 [v0.23 OpenClaw 验证记录](docs/v0.23-openclaw-validation.zh.md)、[v0.24 OpenClaw Agent 验证记录](docs/v0.24-openclaw-agent-validation.zh.md) 与 [v0.25 LangGraph 验证记录](docs/v0.25-langgraph-validation.zh.md)。
+Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，Agent Runtime 选型决策见 [Agent Runtime 技术决策](docs/agent-runtime-decision.zh.md)，对照实验见 [v0.23 OpenClaw 验证记录](docs/v0.23-openclaw-validation.zh.md)、[v0.24 OpenClaw Agent 验证记录](docs/v0.24-openclaw-agent-validation.zh.md)、[v0.25 LangGraph 验证记录](docs/v0.25-langgraph-validation.zh.md) 与 [v0.26 LangGraph 试点验证记录](docs/v0.26-langgraph-pilot-validation.zh.md)。
 
 ## 版本状态
 
@@ -77,6 +78,7 @@ Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow
 - `v0.23`：OpenClaw 受控工具插件、Gateway 调用与 Lobster 独立审批验证
 - `v0.24`：总控/复盘专项 Agent 委派验证、无业务写入检查与 Runtime 限制结论
 - `v0.25`：LangGraph 节点工具隔离、interrupt/resume 审批与 WorkflowRun 线程映射验证
+- `v0.26`：LangGraph 磁盘 checkpoint、真实诊断 API 路径与批准后幂等写回试点
 
 ## 启动
 
@@ -114,6 +116,25 @@ OPENAI_MODEL=你要使用的模型_ID
 ```
 
 服务执行 `node server.mjs` 时会自动加载 `.env.local`。具体模型由本地配置决定；模型切换只需修改 `OPENAI_MODEL` 并重启服务，不需要每次在 PowerShell 中输入配置。调用前请在页面中检查上下文是否包含不希望发送到模型服务的敏感信息；API Key 不会写入 Markdown 或发送到浏览器。
+
+本地协议调试时可配置可信的 Responses endpoint；该地址会接收你的 API key 与分析上下文，因此只应配置为你信任的服务：
+
+```dotenv
+# OPENAI_RESPONSES_URL=http://127.0.0.1:4362/v1/responses
+```
+
+## LangGraph 试点
+
+v0.26 为已有 Workflow Run 提供命令行受控试点。应用服务运行并配置模型后，可执行：
+
+```powershell
+$env:WAY2AIPM_BASE_URL='http://localhost:4173'
+$env:WAY2AIPM_LANGGRAPH_CHECKPOINT_PATH='D:\code\way2aipm\runtime\langgraph\checkpoints.json'
+node integrations/langgraph/review-pilot-runner.mjs start <workflowRunId>
+node integrations/langgraph/review-pilot-runner.mjs resume <workflowRunId> accept_all
+```
+
+`start` 会在候选生成后中断等待明确审批；`accept_all` 才会创建缺陷和训练任务。运行 checkpoint 保存于被 Git 忽略的 `runtime/` 目录，不替代 Markdown 业务记录。
 
 ## 数据存储
 

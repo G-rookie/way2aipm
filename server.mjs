@@ -18,7 +18,9 @@ try {
 }
 
 const PORT = Number(process.env.PORT || 4173);
-const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const OPENAI_RESPONSES_URL = String(
+  process.env.OPENAI_RESPONSES_URL || "https://api.openai.com/v1/responses",
+).trim();
 const PUBLIC_DIR = path.join(__dirname, "public");
 const CONTENT_DIR = path.join(__dirname, "content");
 const OPPORTUNITIES_DIR = path.join(CONTENT_DIR, "opportunities");
@@ -365,6 +367,10 @@ function createTrainingTaskId(title) {
   const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
   const random = Math.random().toString(36).slice(2, 7);
   return `task_${stamp}_${seed}_${random}`;
+}
+
+function createAcceptedCandidateRecordId(prefix, noteId, candidateId) {
+  return `${prefix}_candidate_${noteId}_${candidateId}`;
 }
 
 function createProjectAmmoId(projectName) {
@@ -3521,7 +3527,7 @@ function parseReviewDiagnosisCandidates(note, structuredResponse) {
 function agentToolManifest() {
   return {
     adapterVersion: AGENT_TOOL_ADAPTER_VERSION,
-    runtimeCandidate: "openclaw",
+    runtimeCandidate: "langgraph",
     policy: {
       storageAccess: "api_only",
       directMarkdownWrite: false,
@@ -3819,10 +3825,15 @@ async function actOnAiCandidate(note, input) {
       if (candidate.decision === "accepted" && candidate.createdWeaknessId) {
         weakness = await storage.getWeakness(candidate.createdWeaknessId);
       }
+      const acceptedRecordId = createAcceptedCandidateRecordId("weak", note.id, candidate.id);
+      if (!weakness) {
+        weakness = await storage.getWeakness(acceptedRecordId);
+      }
       if (!weakness) {
         const review = await storage.getReview(note.sourceId);
         if (!review) throw new Error("Related interview review not found");
         weakness = normalizeWeakness({
+          id: acceptedRecordId,
           title: candidate.title,
           category: candidate.category,
           severity: candidate.severity,
@@ -3870,8 +3881,13 @@ async function actOnAiCandidate(note, input) {
       if (candidate.decision === "accepted" && candidate.createdTrainingTaskId) {
         task = await storage.getTrainingTask(candidate.createdTrainingTaskId);
       }
+      const acceptedRecordId = createAcceptedCandidateRecordId("task", note.id, candidate.id);
+      if (!task) {
+        task = await storage.getTrainingTask(acceptedRecordId);
+      }
       if (!task) {
         task = normalizeTrainingTask({
+          id: acceptedRecordId,
           weaknessId: weakness.id,
           title: candidate.title,
           taskType: candidate.taskType,

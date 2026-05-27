@@ -11,7 +11,7 @@
 - Agent 负责需要推理、归纳、规划或工具选择的步骤。
 - AI 生成的是建议或动作提案；关键业务写入必须经人工确认。
 - v0.22 继续使用 Node 原生服务与 Markdown 存储，不引入 LangGraph 依赖。
-- v0.23-v0.24 已验证 OpenClaw 工具边界与子 Agent 限制；v0.25 对照验证后，LangGraph 作为受控复盘闭环试点方向。
+- v0.23-v0.24 已验证 OpenClaw 工具边界与子 Agent 限制；v0.25-v0.26 已验证 LangGraph 的受控复盘闭环与持久审批恢复路径。
 
 ## 为什么先做 Workflow
 
@@ -108,6 +108,13 @@ v0.25 验证补充：
 - `review_specialist` 节点只注入复盘读取和候选校验方法。
 - `approval_gate` 通过 LangGraph `interrupt` 暂停，恢复线程与唯一 `WorkflowRun.id` 对应。
 - `WorkflowRun` 与 Markdown 领域记录仍是业务事实；LangGraph checkpoint 只保存执行状态。
+
+v0.26 试点补充：
+
+- `review_specialist` 调用现有 `run-ai` 路径，候选写入 AI note 供人工审查。
+- `approval_commit` 节点只在 interrupt 恢复为明确批准后调用既有候选采纳 API。
+- checkpoint 以本地 JSON 文件持久保存，可由新的 runner 进程恢复；该运行状态不进入领域 Markdown。
+- 重复恢复同一已批准运行不会重复创建能力缺陷或训练任务。
 
 ### Agent 角色设计
 
@@ -260,35 +267,36 @@ v0.22 的目标是验证流程对象是否真正帮助日常使用，不做通�
 
 ## Agent Runtime 集成方向
 
-v0.22 的轻量 Workflow 实现是产品事实层，而不是必须被框架替换的临时代码。下一阶段优先判断开源 Runtime 能否在它之上可靠执行 Agent 工作。
+v0.22 的轻量 Workflow 实现是产品事实层，而不是必须被框架替换的临时代码。v0.23-v0.26 的验证已确认 LangGraph 可以在它之上承担受控执行编排。
 
 | 关注点 | 保留在 way2AIPM | Runtime 验证方向 |
 | --- | --- | --- |
 | 复盘、缺陷、训练等领域事实 | 是 | 仅经受控工具读取 |
 | `WorkflowRun` 业务状态与时间线 | 是 | 使用唯一 ID 关联执行 |
-| 子 Agent 委派与会话 | 否 | 优先验证 OpenClaw |
-| 持久化多步骤执行与审批暂停 | 业务结果仍保留 | 验证 OpenClaw `Task Flow` |
+| 专项节点调度与会话 | 否 | LangGraph 节点边界 |
+| 持久化多步骤执行与审批暂停 | 业务结果仍保留 | LangGraph checkpoint 与 `interrupt` |
 | 长期记忆与 Skills 生态 | 尚未决定 | Hermes 作为候选对照 |
-| 深度定制图执行 | 当前不需要 | LangGraph 作为条件性备选 |
+| 通用工具协议实验 | 不进入事实层 | 保留 OpenClaw 验证成果作参考 |
 
-### OpenClaw 优先验证
+### LangGraph 受控闭环主线
 
-OpenClaw 官方文档描述了多 Agent routing、sub-agents 和持久化 `Task Flow`，并支持在确定性执行中设置 approval gates。它与 `post_interview_repair_loop` 所需的调度、等待人工确认和恢复执行较为对应。
+v0.25-v0.26 已验证 `post_interview_repair_loop` 的节点能力隔离、人工审批暂停、磁盘 checkpoint 恢复和批准后幂等写入。当前主线是将这条命令行试点接入 Workflow 页面，而不是扩张新的 Agent 场景。
 
-验证时必须遵守：
+继续遵守：
 
 - Runtime 不直接修改 `content/` 下的 Markdown。
-- 专项 Agent 只获得只读与提案工具。
-- 审批后的真实写入继续通过 way2AIPM API 完成。
-- 显式配置 sandbox 与 tool allow/deny，不把 workspace 当作安全边界。
+- `review_specialist` 只获得生成候选所需的能力，批准写入单独注入 `approval_commit`。
+- 审批后的真实写入继续通过 way2AIPM 既有 API 完成。
+- checkpoint 只持有运行状态，不替代领域记录。
+- 页面集成前保留人工工作台为正式可用入口。
 
-### Hermes 候选与 LangGraph 备选
+### OpenClaw 与 Hermes 保留结论
 
-Hermes Agent 官方提供工具集、子 Agent 委派、会话/记忆和 MCP/插件能力，适合作为长期个人 Agent 方向的候选。v0.23 不同时接入两个 Runtime，以免选型结论混杂。
+OpenClaw 的受控 Tool Plugin 与 Lobster 审批验证结果可作为协议和运行时研究参考，但其原生子 Agent 权限继承不满足本项目严格角色隔离要求，因此不进入当前闭环主线。
 
-LangGraph 保留为条件性备选：当现成 Runtime 不能满足受控工具、状态关联、人工审批恢复或部署要求时，再评估自定义 graph、interrupt 与 checkpoint 实现。
+Hermes Agent 官方提供工具集、子 Agent 委派、会话/记忆和 MCP/插件能力，仍适合作为未来长期个人 Agent 与记忆生态的候选；当前不并行产品化。
 
-完整决策与验证标准见 [Agent Runtime 技术决策](agent-runtime-decision.zh.md) 和 [v0.23 产品规格](v0.23-product-spec.zh.md)。
+完整决策与验证标准见 [Agent Runtime 技术决策](agent-runtime-decision.zh.md)、[v0.25 验证记录](v0.25-langgraph-validation.zh.md) 和 [v0.26 验证记录](v0.26-langgraph-pilot-validation.zh.md)。
 
 ## 后续 Workflow
 

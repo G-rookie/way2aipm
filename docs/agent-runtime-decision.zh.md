@@ -2,10 +2,10 @@
 
 ## 决策状态
 
-- 状态：`Accepted for controlled pilot`，选择 LangGraph 进入受控复盘闭环试点。
+- 状态：`Controlled pilot validated`，LangGraph 受控复盘闭环已通过命令行试点验证，待页面集成。
 - 初始日期：`2026-05-26`；更新日期：`2026-05-27`。
-- 决策依据：`v0.23-v0.24` OpenClaw 验证与 `v0.25` LangGraph 对照验证。
-- 影响范围：`v0.26+` Agent Runtime、工具权限、流程执行与未来技术选型。
+- 决策依据：`v0.23-v0.24` OpenClaw 验证、`v0.25` LangGraph 对照验证与 `v0.26` 受控闭环试点。
+- 影响范围：`v0.27+` Agent Runtime、工具权限、流程执行与未来技术选型。
 
 ## 背景
 
@@ -23,7 +23,7 @@ v0.22 已实现 `WorkflowRun` 与面试后修复闭环。它记录真实业务�
 1. 保留 v0.22 的 `WorkflowRun`、领域数据与人工审批边界，它们属于 `way2AIPM OS` 的产品事实层。
 2. `v0.23-v0.24` 已完成 **OpenClaw** 验证：受控工具层可复用，但原生子 Agent 继承父级工具允许边界，不能作为本项目严格角色隔离的正式编排基础。
 3. `v0.25` 已完成 **LangGraph** 针对性对照验证：节点依赖注入实现严格工具隔离，`interrupt` / `Command({ resume })` 跑通审批前暂停与恢复，并保持领域记录零写入。
-4. 从 `v0.26` 开始，以 **LangGraph** 推进受控复盘闭环试点；在持久 checkpoint、真实诊断触发和幂等采纳写回通过前，不扩大到更多专项 Agent。
+4. `v0.26` 已通过磁盘 checkpoint、新 runner 恢复、现有诊断 API 调用与幂等采纳写回验证；`v0.27` 将其接入 Workflow 页面，仍不提前扩大到更多专项 Agent。
 5. **OpenClaw** 的 Tool Plugin 与 Lobster 结果保留为协议/审批能力参考；**Hermes Agent** 保留为未来个人记忆与工具生态研究对象，不进入当前主线。
 
 ## 模块与 Agent 边界
@@ -113,7 +113,9 @@ v0.25 使用 `@langchain/langgraph@1.3.2` 复用相同复盘候选流程，已�
 - `interrupt()` 在人工审批前暂停，`Command({ resume })` 以同一 `WorkflowRun.id` 线程恢复。
 - 恢复选择 defer 后，`WorkflowRun` 保持 `diagnosis_pending`，AI note、缺陷和训练任务均无新增。
 
-该结果满足进入受控试点的核心边界要求，但不等同于生产采纳。v0.26 仍需验证持久 checkpoint、真实模型触发、采纳写回幂等与故障重试。
+v0.26 在该基础上以现有 `run-ai` 和 `candidate-actions` API 跑通命令行试点：审批中断可由新 runner 从磁盘 checkpoint 恢复，明确批准后只写入一份缺陷和训练任务，重复恢复不重复创建记录。
+
+该结果满足进入页面集成的核心要求，但不等同于生产发布。页面逐条审批、失败重试体验、并发/部署级 checkpointer 与真实模型质量仍需继续验证。
 
 ## 验证结果与试点范围
 
@@ -124,6 +126,7 @@ v0.25 使用 `@langchain/langgraph@1.3.2` 复用相同复盘候选流程，已�
 - 暴露只读工具或模拟 Tool Adapter：读取复盘与当前 `WorkflowRun`。
 - 输出缺陷/训练候选提案，但不允许 Runtime 直接写入 Markdown。
 - 通过 LangGraph 将一条 `post_interview_repair_loop` 候选路径与 `WorkflowRun.id` 线程对应，验证审批 interrupt/resume 和零业务写入。
+- 通过 LangGraph 试点 runner 调用现有正式诊断 API 路径，验证磁盘 checkpoint 恢复和批准后幂等写回。
 
 试点阶段仍不做：
 
@@ -136,7 +139,7 @@ v0.25 使用 `@langchain/langgraph@1.3.2` 复用相同复盘候选流程，已�
 
 只有继续满足以下标准，才在后续版本将 LangGraph 从试点推进为正式 Runtime：
 
-- 使用持久 checkpointer 后，可在进程重启后继续同一条审批中断流程。
+- 页面可发起和查看持久运行，并能在服务/runner 重启后继续同一条审批中断流程。
 - 节点只能访问明确注入的读取/提案工具，不能越过审批修改业务记录。
 - 可将一次复盘闭环与唯一 `WorkflowRun` 幂等关联。
 - 真实模型调用失败、重复恢复或人工采纳重试不会重复创建领域记录。
@@ -154,7 +157,7 @@ v0.25 使用 `@langchain/langgraph@1.3.2` 复用相同复盘候选流程，已�
 
 成本与风险：
 
-- v0.23-v0.25 为验证版本，不会立刻带来新的最终用户功能。
+- v0.23-v0.26 为验证与命令行试点版本，页面中的最终用户入口仍待接入。
 - 需要处理 Runtime 与本系统之间的双状态关联。
 - 外部 Runtime 的安装、安全配置和 Windows 使用体验需要实测确认。
 
