@@ -35,15 +35,16 @@
 | Workflow Foundation | `v0.22` | WorkflowRun、面试后修复闭环、总控流程状态、人工审批边界 |
 | Runtime 边界验证 | `v0.23` | OpenClaw Tool Plugin、Gateway 工具调用、Lobster 独立审批暂停/恢复 |
 | Agent 委派验证 | `v0.24` | 总控/复盘专项 Agent 实验、无写入校验、OpenClaw 严格隔离限制结论 |
+| 编排对照验证 | `v0.25` | LangGraph 节点工具隔离、interrupt/resume 审批、WorkflowRun 线程映射与零写入校验 |
 
 ## 后续路线
 
 | 版本 | 优先级 | 主题 | 主要交付 |
 | --- | --- | --- | --- |
-| `v0.25` | P0 | LangGraph 针对性对照验证 | 节点工具隔离；interrupt 审批；WorkflowRun 幂等状态映射 |
-| `v0.26` | P1 | Runtime 决策与面试前 Agent | 确认采用路线后扩展 JD 拆解、问题预测、项目匹配与 Brief 建议 |
-| `v0.27` | P2 | 公开展示与 Next.js 试点 | 独立作品集展示面；脱敏模型；Next.js 架构验证 |
-| `v0.28+` | P3 | 发布级产品化 | 数据存储决策、登录、部署、云数据、权限与公开访问 |
+| `v0.26` | P0 | LangGraph 受控复盘闭环试点 | Runtime 决策固化；持久 checkpoint；真实诊断触发；幂等审批写回验证 |
+| `v0.27` | P1 | 面试前专项 Agent | JD 拆解、问题预测、项目匹配与 Brief 建议 |
+| `v0.28` | P2 | 公开展示与 Next.js 试点 | 独立作品集展示面；脱敏模型；Next.js 架构验证 |
+| `v0.29+` | P3 | 发布级产品化 | 数据存储决策、登录、部署、云数据、权限与公开访问 |
 
 ## 技术决策点
 
@@ -70,10 +71,11 @@ AI 的推进已经从单点调用进入流程编排阶段。后续顺序调整�
   -> 正式 API 接入
   -> Workflow 状态与审批编排
   -> OpenClaw Runtime 与受控工具层验证
-  -> Task Flow 集成或候选 Runtime 对照
+  -> LangGraph 节点隔离与 interrupt 对照验证
+  -> LangGraph 受控闭环试点
   -> 更广泛的场景扩展
 ```
 
 ## 当前下一步
 
-`v0.25`：复用已验证的 Tool Adapter 与复盘流程断言，对 LangGraph 的节点权限隔离、审批中断/恢复与 `WorkflowRun` 幂等状态映射开展针对性对照验证。
+`v0.26`：将已通过对照验证的 LangGraph 路径推进为受控复盘闭环试点，补齐持久 checkpoint、真实诊断触发以及人工采纳后的幂等状态写回验证。

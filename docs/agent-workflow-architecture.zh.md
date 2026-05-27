@@ -11,7 +11,7 @@
 - Agent 负责需要推理、归纳、规划或工具选择的步骤。
 - AI 生成的是建议或动作提案；关键业务写入必须经人工确认。
 - v0.22 继续使用 Node 原生服务与 Markdown 存储，不引入 LangGraph 依赖。
-- v0.23 优先验证 OpenClaw 作为外部 Agent Runtime，Hermes 作为候选，LangGraph 作为条件性备选。
+- v0.23-v0.24 已验证 OpenClaw 工具边界与子 Agent 限制；v0.25 对照验证后，LangGraph 作为受控复盘闭环试点方向。
 
 ## 为什么先做 Workflow
 
@@ -59,7 +59,7 @@ UI Workbench
       -> WorkflowRun / Markdown Storage Adapter
       -> AI Provider
 
-Agent Runtime Candidate (OpenClaw first)
+Agent Runtime Pilot (LangGraph controlled workflow)
   -> Orchestrator Agent
       -> Specialist Agents
           -> Approval Policy
@@ -101,6 +101,13 @@ v0.22 已建立的 Workflow 层属于产品领域逻辑，不等同于后续可�
 | Propose Write | 提议创建缺陷、训练任务、Brief 更新 | 只生成提案 |
 | Commit Write | 创建或修改真实业务记录 | 必须人工确认 |
 | Restricted | 删除记录、公开发布、发送外部消息 | 第一阶段不提供 |
+
+v0.25 验证补充：
+
+- `orchestrator` 节点不注入领域 adapter。
+- `review_specialist` 节点只注入复盘读取和候选校验方法。
+- `approval_gate` 通过 LangGraph `interrupt` 暂停，恢复线程与唯一 `WorkflowRun.id` 对应。
+- `WorkflowRun` 与 Markdown 领域记录仍是业务事实；LangGraph checkpoint 只保存执行状态。
 
 ### Agent 角色设计
 

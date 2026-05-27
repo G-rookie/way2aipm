@@ -2,7 +2,7 @@
 
 一个面向 AI PM 求职与成长的本地 Markdown 工作台。
 
-## 当前版本：v0.24
+## 当前版本：v0.25
 
 当前版本已经覆盖：
 
@@ -43,11 +43,12 @@
 - Markdown 文件存储
 - OpenClaw 受控 Tool Plugin 与审批底座验证
 - 总控/复盘专项 Agent 委派实验与 Runtime 限制结论
+- LangGraph 节点工具隔离与审批中断/恢复对照验证
 
-暂不实现登录、云同步、公开发布、删除能力和自动采纳 AI 建议。v0.24 已验证受控 Runtime 工具与审批候选边界，也确认 OpenClaw 原生子 Agent 暂不满足严格角色工具隔离要求；AI 候选仍只有经人工采纳后才会写入缺陷或训练 Markdown，流程关闭也由用户确认。
+暂不实现登录、云同步、公开发布、删除能力和自动采纳 AI 建议。v0.25 已验证 LangGraph 节点可按职责隔离工具，并能在审批前中断及恢复；当前只将其确定为受控复盘闭环试点方向，AI 候选仍只有经人工采纳后才会写入缺陷或训练 Markdown。
 
 项目后续路线见 [Roadmap](docs/roadmap.zh.md)。
-Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，Agent Runtime 选型决策见 [Agent Runtime 技术决策](docs/agent-runtime-decision.zh.md)，OpenClaw 验证见 [v0.23 产品规格](docs/v0.23-product-spec.zh.md)、[v0.23 验证记录](docs/v0.23-openclaw-validation.zh.md)、[v0.24 产品规格](docs/v0.24-product-spec.zh.md) 与 [v0.24 验证记录](docs/v0.24-openclaw-agent-validation.zh.md)。
+Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，Agent Runtime 选型决策见 [Agent Runtime 技术决策](docs/agent-runtime-decision.zh.md)，对照实验见 [v0.23 OpenClaw 验证记录](docs/v0.23-openclaw-validation.zh.md)、[v0.24 OpenClaw Agent 验证记录](docs/v0.24-openclaw-agent-validation.zh.md) 与 [v0.25 LangGraph 验证记录](docs/v0.25-langgraph-validation.zh.md)。
 
 ## 版本状态
 
@@ -75,6 +76,7 @@ Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow
 - `v0.22`：WorkflowRun、面试后修复闭环、总控流程状态、人工审批边界与流程控制
 - `v0.23`：OpenClaw 受控工具插件、Gateway 调用与 Lobster 独立审批验证
 - `v0.24`：总控/复盘专项 Agent 委派验证、无业务写入检查与 Runtime 限制结论
+- `v0.25`：LangGraph 节点工具隔离、interrupt/resume 审批与 WorkflowRun 线程映射验证
 
 ## 启动
 

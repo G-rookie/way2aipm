@@ -2,9 +2,10 @@
 
 ## 决策状态
 
-- 状态：`Proposed`，待 `v0.23` 可行性验证后确认采用方案。
-- 日期：`2026-05-26`。
-- 影响范围：`v0.23+` Agent Runtime、工具权限、流程执行与未来技术选型。
+- 状态：`Accepted for controlled pilot`，选择 LangGraph 进入受控复盘闭环试点。
+- 初始日期：`2026-05-26`；更新日期：`2026-05-27`。
+- 决策依据：`v0.23-v0.24` OpenClaw 验证与 `v0.25` LangGraph 对照验证。
+- 影响范围：`v0.26+` Agent Runtime、工具权限、流程执行与未来技术选型。
 
 ## 背景
 
@@ -20,10 +21,10 @@ v0.22 已实现 `WorkflowRun` 与面试后修复闭环。它记录真实业务�
 采取以下技术方向：
 
 1. 保留 v0.22 的 `WorkflowRun`、领域数据与人工审批边界，它们属于 `way2AIPM OS` 的产品事实层。
-2. 将 Agent Runtime 从“默认自行使用 LangGraph 实现”调整为“优先验证现成开源运行时”。
-3. `v0.23` 首选验证 **OpenClaw**，因为其官方能力中同时包含多 Agent 路由、子 Agent 与可持久化的 `Task Flow`/审批执行路径，与现有修复闭环最接近。
-4. **Hermes Agent** 作为候选运行时保留，用于对照长期个人 Agent、记忆、工具集与 delegation 能力；本阶段不并行接入两个 Runtime。
-5. **LangGraph** 暂不作为默认迁移路线。只有当现成 Runtime 无法满足领域状态映射、审批恢复或部署边界时，再以自定义编排备选方案评估。
+2. `v0.23-v0.24` 已完成 **OpenClaw** 验证：受控工具层可复用，但原生子 Agent 继承父级工具允许边界，不能作为本项目严格角色隔离的正式编排基础。
+3. `v0.25` 已完成 **LangGraph** 针对性对照验证：节点依赖注入实现严格工具隔离，`interrupt` / `Command({ resume })` 跑通审批前暂停与恢复，并保持领域记录零写入。
+4. 从 `v0.26` 开始，以 **LangGraph** 推进受控复盘闭环试点；在持久 checkpoint、真实诊断触发和幂等采纳写回通过前，不扩大到更多专项 Agent。
+5. **OpenClaw** 的 Tool Plugin 与 Lobster 结果保留为协议/审批能力参考；**Hermes Agent** 保留为未来个人记忆与工具生态研究对象，不进入当前主线。
 
 ## 模块与 Agent 边界
 
@@ -50,10 +51,10 @@ flowchart LR
   UI["way2AIPM 工作台"] --> DomainAPI["领域 API / Tool Adapter"]
   DomainAPI --> Records["Markdown 业务记录<br/>后续可迁移数据库"]
   DomainAPI --> Runs["WorkflowRun 审计状态"]
-  Runtime["Agent Runtime 候选<br/>OpenClaw 优先验证"] --> Orchestrator["总控 Agent"]
+  Runtime["Agent Runtime 试点<br/>LangGraph 受控编排"] --> Orchestrator["总控 Agent"]
   Orchestrator --> Specialist["复盘 Specialist Agent"]
   Specialist --> DomainAPI
-  Runtime --> RuntimeState["会话 / Task Flow 执行状态"]
+  Runtime --> RuntimeState["图执行状态 / checkpoint"]
   Specialist --> Proposal["候选建议"]
   Proposal --> Approval["用户审批"]
   Approval --> DomainAPI
@@ -68,9 +69,9 @@ flowchart LR
 
 ## 候选方案判断
 
-### OpenClaw：优先验证
+### OpenClaw：已验证，不作为正式闭环编排主线
 
-依据官方文档，OpenClaw 已提供：
+依据官方文档与 v0.23-v0.24 实验，OpenClaw 已提供并证明部分可用：
 
 - 多 Agent routing，可用独立 workspace、session 和工具配置隔离不同 Agent。
 - sub-agents，可从当前执行中派发子任务。
@@ -83,15 +84,16 @@ flowchart LR
 | --- | --- |
 | 总控调度入口 | 一个 Orchestrator Agent 是否可以选择复盘专项能力 |
 | 复盘诊断 | Review Specialist 是否可以调用只读工具并输出结构化候选 |
-| `WorkflowRun` 状态 | Task Flow 状态是否能稳定映射回业务流程记录 |
+| `WorkflowRun` 状态 | 本轮未采纳为正式 Task Flow 映射路线 |
 | 候选采纳 | approval gate 是否能停在人工确认前 |
 | 恢复执行 | 服务重启或等待后是否能继续同一流程 |
 
-需要特别防范的边界：
+关键结论：
 
-- OpenClaw 官方提示 workspace 是默认工作目录，并非硬安全边界；因此验证必须配置 sandbox 与工具 allow/deny。
-- OpenClaw 的流程状态不可替代业务数据；必须定义单向或幂等同步策略。
-- 当前本地开发位于 Windows，验证阶段需确认原生环境或 WSL2 的可用成本。
+- 受控 Tool Plugin 能读取上下文和校验候选，并证明审批前不写入领域记录。
+- Lobster 独立审批暂停/恢复可运行，但尚未成为领域闭环编排。
+- 原生子 Agent 继承父 Agent 工具允许边界；若总控不拥有复盘工具，专项 Agent 也无法获得它，因此严格角色隔离不满足。
+- `sessions_yield` 实验出现父 session 写锁竞争，不宜继续将该路径作为当前正式编排基础。
 
 ### Hermes Agent：候选保留
 
@@ -101,46 +103,46 @@ flowchart LR
 - Skills/工具生态对个人 Agent 的支持。
 - 主 Agent 向专项任务委派的体验。
 
-当前不将其设为首个集成对象，原因是本阶段核心验证目标是现有 `WorkflowRun` 的审批闭环与可恢复流程，而 OpenClaw 的 `Task Flow` 与这一目标更加直接对应。
+当前不将其设为主线集成对象，原因是本阶段核心验证目标是现有 `WorkflowRun` 的严格工具隔离、审批闭环与可恢复流程，而 LangGraph 已对这些关键边界给出更直接的通过结果。
 
-### LangGraph：条件性备选
+### LangGraph：受控复盘闭环试点方向
 
-LangGraph 仍然是自定义流程图、interrupt 和 checkpoint 的可选实现方式，但不再是既定下一步。仅在以下情况出现时启动验证：
+v0.25 使用 `@langchain/langgraph@1.3.2` 复用相同复盘候选流程，已验证：
 
-- OpenClaw/Hermes 无法与领域 API 建立受控工具边界。
-- 外部 Runtime 的流程状态无法可靠关联 `WorkflowRun`。
-- 审批恢复、失败重试或部署方案不能满足本地使用要求。
-- 需要极深的流程节点定制，而通用 Runtime 的扩展成本高于自建图执行。
+- `orchestrator` 节点不取得领域 adapter，`review_specialist` 节点仅取得读取/提案校验能力。
+- `interrupt()` 在人工审批前暂停，`Command({ resume })` 以同一 `WorkflowRun.id` 线程恢复。
+- 恢复选择 defer 后，`WorkflowRun` 保持 `diagnosis_pending`，AI note、缺陷和训练任务均无新增。
 
-## v0.23 验证范围
+该结果满足进入受控试点的核心边界要求，但不等同于生产采纳。v0.26 仍需验证持久 checkpoint、真实模型触发、采纳写回幂等与故障重试。
 
-v0.23 只做可行性验证和最小适配，不做全面迁移：
+## 验证结果与试点范围
+
+已完成：
 
 - 建立 OpenClaw 的本地运行方式与安全配置结论。
 - 建立一个总控 Agent 和一个面试后复盘专项 Agent 的最小实验。
 - 暴露只读工具或模拟 Tool Adapter：读取复盘与当前 `WorkflowRun`。
 - 输出缺陷/训练候选提案，但不允许 Runtime 直接写入 Markdown。
-- 尝试将一条 `post_interview_repair_loop` 映射到 `Task Flow`，验证人工审批前暂停和恢复。
-- 记录 Windows/WSL2、密钥管理、状态同步与错误恢复成本。
+- 通过 LangGraph 将一条 `post_interview_repair_loop` 候选路径与 `WorkflowRun.id` 线程对应，验证审批 interrupt/resume 和零业务写入。
 
-v0.23 不做：
+试点阶段仍不做：
 
 - 不替换现有页面和 v0.22 Workflow 实现。
 - 不将全部业务模块 Agent 化。
 - 不允许 Runtime 自动创建或修改真实业务记录。
-- 不同时引入 OpenClaw、Hermes 与 LangGraph 三套依赖。
+- 不将 OpenClaw、Hermes 与 LangGraph 三条 Runtime 路线并行产品化。
 
 ## 通过标准
 
-只有同时满足以下标准，才在后续版本采用 OpenClaw 作为 Runtime：
+只有继续满足以下标准，才在后续版本将 LangGraph 从试点推进为正式 Runtime：
 
-- 可在本地可靠启动，并给出用户可重复的运行配置。
-- Agent 只能访问明确允许的读取/提案工具，不能越过审批修改业务记录。
-- 可将一次复盘闭环与唯一 `WorkflowRun` 可靠关联。
-- 可在等待人工决定时暂停，并在决定后继续执行。
-- 状态同步、错误处理与开发复杂度明显低于自行实现运行时。
+- 使用持久 checkpointer 后，可在进程重启后继续同一条审批中断流程。
+- 节点只能访问明确注入的读取/提案工具，不能越过审批修改业务记录。
+- 可将一次复盘闭环与唯一 `WorkflowRun` 幂等关联。
+- 真实模型调用失败、重复恢复或人工采纳重试不会重复创建领域记录。
+- 开发复杂度与本地使用体验可接受。
 
-若无法满足，通过 v0.23 结论决定验证 Hermes 或回到 LangGraph 自定义编排，而不是强行继续集成。
+若无法满足，继续保留现有人工审批流程作为正式路径，不强行扩大 Agent 自动化范围。
 
 ## 影响
 
@@ -152,7 +154,7 @@ v0.23 不做：
 
 成本与风险：
 
-- v0.23 将是验证版本，不会立刻带来新的最终用户功能。
+- v0.23-v0.25 为验证版本，不会立刻带来新的最终用户功能。
 - 需要处理 Runtime 与本系统之间的双状态关联。
 - 外部 Runtime 的安装、安全配置和 Windows 使用体验需要实测确认。
 
@@ -166,3 +168,5 @@ v0.23 不做：
 - [Hermes Agent Architecture](https://hermes-agent.nousresearch.com/docs/developer-guide/architecture)
 - [Hermes Agent Tools and Toolsets](https://hermes-agent.nousresearch.com/docs/user-guide/features/tools)
 - [LangGraph Workflows and Agents](https://docs.langchain.com/oss/javascript/langgraph/workflows-agents)
+- [LangGraph Interrupts](https://docs.langchain.com/oss/javascript/langgraph/interrupts)
+- [LangGraph Persistence](https://docs.langchain.com/oss/javascript/langgraph/persistence)
