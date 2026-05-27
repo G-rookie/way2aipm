@@ -39,6 +39,9 @@ const AI_ANALYSIS_NOTES_DIR = path.join(CONTENT_DIR, "ai-analysis-notes");
 const AI_FRONTIER_CARDS_DIR = path.join(CONTENT_DIR, "ai-frontier-cards");
 const RHYTHM_LOGS_DIR = path.join(CONTENT_DIR, "rhythm-logs");
 const WORKFLOW_RUNS_DIR = path.join(CONTENT_DIR, "workflow-runs");
+const LANGGRAPH_CHECKPOINT_PATH = path.resolve(
+  String(process.env.WAY2AIPM_LANGGRAPH_CHECKPOINT_PATH || path.join(__dirname, "runtime", "langgraph", "checkpoints.json")),
+);
 const PORTFOLIO_PROFILE_ID = "portfolio_profile";
 
 const STAGES = new Set([
@@ -3162,6 +3165,30 @@ async function updateWorkflowRunAction(existing, input) {
   throw new Error("Unsupported workflow action");
 }
 
+function localRuntimeApiBaseUrl(url) {
+  const port = String(url.port || PORT);
+  if (!/^\d+$/.test(port)) throw new Error("Invalid runtime request port");
+  return `http://127.0.0.1:${port}`;
+}
+
+async function createWorkflowRuntimeGraph(baseUrl) {
+  const [{ JsonFileCheckpointSaver }, runtime] = await Promise.all([
+    import("./integrations/langgraph/json-file-checkpoint-saver.mjs"),
+    import("./integrations/langgraph/review-pilot-graph.mjs"),
+  ]);
+  const graph = runtime.createReviewPilotGraph({
+    checkpointer: new JsonFileCheckpointSaver(LANGGRAPH_CHECKPOINT_PATH),
+    diagnosisTools: runtime.createDiagnosisTools(baseUrl),
+    commitTools: runtime.createApprovalCommitTools(baseUrl),
+  });
+  return { graph, runtime };
+}
+
+async function readWorkflowRuntimeSummary(workflowRunId, baseUrl) {
+  const { graph, runtime } = await createWorkflowRuntimeGraph(baseUrl);
+  return runtime.readReviewPilotSummary(graph, workflowRunId);
+}
+
 async function getExpressionDrillSource(sourceType, sourceId) {
   if (sourceType === "follow_up_question") return getFollowUpQuestion(sourceId);
   if (sourceType === "weakness") return getWeakness(sourceId);
@@ -4650,6 +4677,73 @@ async function handleApi(req, res, url) {
         return sendJson(res, 200, { workflowRun });
       } catch (error) {
         return sendJson(res, 400, { error: error.message });
+      }
+    }
+    return methodNotAllowed(res);
+  }
+
+  const workflowRuntimeMatch = url.pathname.match(/^\/api\/workflow-runs\/([^/]+)\/runtime$/);
+  if (workflowRuntimeMatch) {
+    const id = decodeURIComponent(workflowRuntimeMatch[1]);
+    if (req.method === "GET") {
+      const workflowRun = await storage.getWorkflowRun(id);
+      if (!workflowRun) return notFound(res);
+      try {
+        const runtime = await readWorkflowRuntimeSummary(id, localRuntimeApiBaseUrl(url));
+        return sendJson(res, 200, { runtime });
+      } catch (error) {
+        return sendJson(res, 503, { error: `Runtime 暂不可用：${error.message}` });
+      }
+    }
+    return methodNotAllowed(res);
+  }
+
+  const workflowRuntimeStartMatch = url.pathname.match(/^\/api\/workflow-runs\/([^/]+)\/runtime\/start$/);
+  if (workflowRuntimeStartMatch) {
+    const id = decodeURIComponent(workflowRuntimeStartMatch[1]);
+    if (req.method === "POST") {
+      const workflowRun = await storage.getWorkflowRun(id);
+      if (!workflowRun) return notFound(res);
+      if (workflowRun.status === "completed") {
+        return sendJson(res, 400, { error: "已完成的流程不能启动新的 Runtime" });
+      }
+      try {
+        const { graph, runtime } = await createWorkflowRuntimeGraph(localRuntimeApiBaseUrl(url));
+        const existing = await runtime.readReviewPilotSummary(graph, id);
+        if (["not_started", "running"].includes(existing.status)) {
+          await runtime.startReviewPilot(graph, id);
+        }
+        return sendJson(res, 200, { runtime: await runtime.readReviewPilotSummary(graph, id) });
+      } catch (error) {
+        return sendJson(res, 400, { error: `受控诊断启动失败：${error.message}` });
+      }
+    }
+    return methodNotAllowed(res);
+  }
+
+  const workflowRuntimeResumeMatch = url.pathname.match(/^\/api\/workflow-runs\/([^/]+)\/runtime\/resume$/);
+  if (workflowRuntimeResumeMatch) {
+    const id = decodeURIComponent(workflowRuntimeResumeMatch[1]);
+    if (req.method === "POST") {
+      const workflowRun = await storage.getWorkflowRun(id);
+      if (!workflowRun) return notFound(res);
+      const body = await readRequestBody(req);
+      try {
+        const { graph, runtime } = await createWorkflowRuntimeGraph(localRuntimeApiBaseUrl(url));
+        const existing = await runtime.readReviewPilotSummary(graph, id);
+        if (existing.status === "completed") {
+          return sendJson(res, 200, { runtime: existing });
+        }
+        if (existing.status !== "waiting_for_approval") {
+          return sendJson(res, 400, { error: "当前 Runtime 没有等待审批的诊断候选" });
+        }
+        await runtime.resumeReviewPilot(graph, id, {
+          action: String(body.action || ""),
+          decisions: Array.isArray(body.decisions) ? body.decisions : [],
+        });
+        return sendJson(res, 200, { runtime: await runtime.readReviewPilotSummary(graph, id) });
+      } catch (error) {
+        return sendJson(res, 400, { error: `审批提交失败：${error.message}` });
       }
     }
     return methodNotAllowed(res);

@@ -2,10 +2,10 @@
 
 ## 决策状态
 
-- 状态：`Controlled pilot validated`，LangGraph 受控复盘闭环已通过命令行试点验证，待页面集成。
+- 状态：`Controlled runtime integrated`，LangGraph 受控复盘闭环已接入 Workflow 页面并通过 API 烟测验证。
 - 初始日期：`2026-05-26`；更新日期：`2026-05-27`。
-- 决策依据：`v0.23-v0.24` OpenClaw 验证、`v0.25` LangGraph 对照验证与 `v0.26` 受控闭环试点。
-- 影响范围：`v0.27+` Agent Runtime、工具权限、流程执行与未来技术选型。
+- 决策依据：`v0.23-v0.24` OpenClaw 验证、`v0.25` LangGraph 对照验证、`v0.26` 受控闭环试点与 `v0.27` 页面集成验证。
+- 影响范围：`v0.28+` Agent Runtime、工具权限、流程执行与未来技术选型。
 
 ## 背景
 
@@ -23,7 +23,7 @@ v0.22 已实现 `WorkflowRun` 与面试后修复闭环。它记录真实业务�
 1. 保留 v0.22 的 `WorkflowRun`、领域数据与人工审批边界，它们属于 `way2AIPM OS` 的产品事实层。
 2. `v0.23-v0.24` 已完成 **OpenClaw** 验证：受控工具层可复用，但原生子 Agent 继承父级工具允许边界，不能作为本项目严格角色隔离的正式编排基础。
 3. `v0.25` 已完成 **LangGraph** 针对性对照验证：节点依赖注入实现严格工具隔离，`interrupt` / `Command({ resume })` 跑通审批前暂停与恢复，并保持领域记录零写入。
-4. `v0.26` 已通过磁盘 checkpoint、新 runner 恢复、现有诊断 API 调用与幂等采纳写回验证；`v0.27` 将其接入 Workflow 页面，仍不提前扩大到更多专项 Agent。
+4. `v0.26` 已通过磁盘 checkpoint、新 runner 恢复、现有诊断 API 调用与幂等采纳写回验证；`v0.27` 已将其接入 Workflow 页面，支持逐条审批与失败重试，仍不提前扩大到更多专项 Agent。
 5. **OpenClaw** 的 Tool Plugin 与 Lobster 结果保留为协议/审批能力参考；**Hermes Agent** 保留为未来个人记忆与工具生态研究对象，不进入当前主线。
 
 ## 模块与 Agent 边界
@@ -115,7 +115,9 @@ v0.25 使用 `@langchain/langgraph@1.3.2` 复用相同复盘候选流程，已�
 
 v0.26 在该基础上以现有 `run-ai` 和 `candidate-actions` API 跑通命令行试点：审批中断可由新 runner 从磁盘 checkpoint 恢复，明确批准后只写入一份缺陷和训练任务，重复恢复不重复创建记录。
 
-该结果满足进入页面集成的核心要求，但不等同于生产发布。页面逐条审批、失败重试体验、并发/部署级 checkpointer 与真实模型质量仍需继续验证。
+v0.27 在 Workflow 页面提供启动和审批入口，并通过服务端 Runtime API 验证逐条决策、关联缺陷依赖校验、失败重试及已完成运行幂等读取。
+
+该结果满足扩展下一项受控 Agent 场景的核心要求，但不等同于生产发布。并发/部署级 checkpointer 与真实模型质量仍需继续验证。
 
 ## 验证结果与试点范围
 
@@ -127,10 +129,11 @@ v0.26 在该基础上以现有 `run-ai` 和 `candidate-actions` API 跑通命令
 - 输出缺陷/训练候选提案，但不允许 Runtime 直接写入 Markdown。
 - 通过 LangGraph 将一条 `post_interview_repair_loop` 候选路径与 `WorkflowRun.id` 线程对应，验证审批 interrupt/resume 和零业务写入。
 - 通过 LangGraph 试点 runner 调用现有正式诊断 API 路径，验证磁盘 checkpoint 恢复和批准后幂等写回。
+- 通过 Workflow 页面所依赖的 Runtime API 验证启动、状态查询、逐条审批、失败重试和幂等结果。
 
 试点阶段仍不做：
 
-- 不替换现有页面和 v0.22 Workflow 实现。
+- 不替换 v0.22 Workflow 领域实现或现有手动 AI 分析入口。
 - 不将全部业务模块 Agent 化。
 - 不允许 Runtime 自动创建或修改真实业务记录。
 - 不将 OpenClaw、Hermes 与 LangGraph 三条 Runtime 路线并行产品化。
@@ -157,7 +160,7 @@ v0.26 在该基础上以现有 `run-ai` 和 `candidate-actions` API 跑通命令
 
 成本与风险：
 
-- v0.23-v0.26 为验证与命令行试点版本，页面中的最终用户入口仍待接入。
+- v0.23-v0.26 为验证与命令行试点版本；v0.27 页面入口仍面向本地单用户使用，不是部署级 Runtime。
 - 需要处理 Runtime 与本系统之间的双状态关联。
 - 外部 Runtime 的安装、安全配置和 Windows 使用体验需要实测确认。
 

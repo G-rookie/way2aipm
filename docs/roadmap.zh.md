@@ -37,12 +37,12 @@
 | Agent 委派验证 | `v0.24` | 总控/复盘专项 Agent 实验、无写入校验、OpenClaw 严格隔离限制结论 |
 | 编排对照验证 | `v0.25` | LangGraph 节点工具隔离、interrupt/resume 审批、WorkflowRun 线程映射与零写入校验 |
 | 受控闭环试点 | `v0.26` | LangGraph 磁盘 checkpoint、真实诊断 API 路径、新 runner 恢复与批准后幂等写回 |
+| Runtime 页面集成 | `v0.27` | Workflow 页面发起诊断、展示审批中断、逐条审批、依赖校验与失败重试 |
 
 ## 后续路线
 
 | 版本 | 优先级 | 主题 | 主要交付 |
 | --- | --- | --- | --- |
-| `v0.27` | P0 | Runtime 页面集成 | Workflow 页面发起诊断；展示 interrupt；逐条审批；错误恢复 |
 | `v0.28` | P1 | 面试前专项 Agent | JD 拆解、问题预测、项目匹配与 Brief 建议 |
 | `v0.29` | P2 | 公开展示与 Next.js 试点 | 独立作品集展示面；脱敏模型；Next.js 架构验证 |
 | `v0.30+` | P3 | 发布级产品化 | 数据存储决策、登录、部署、云数据、权限与公开访问 |
@@ -74,9 +74,10 @@ AI 的推进已经从单点调用进入流程编排阶段。后续顺序调整�
   -> OpenClaw Runtime 与受控工具层验证
   -> LangGraph 节点隔离与 interrupt 对照验证
   -> LangGraph 受控闭环试点
+  -> Workflow 页面 Runtime 集成
   -> 更广泛的场景扩展
 ```
 
 ## 当前下一步
 
-`v0.27`：将已验证的 LangGraph 受控复盘闭环接入 Workflow 页面，展示待审批运行状态并支持逐条候选决策与错误恢复。
+`v0.28`：沿用受控 Runtime 模式进入面试前专项 Agent，先实现 JD 拆解、问题预测、项目匹配与 Brief 建议的人工确认闭环。

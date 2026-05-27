@@ -7,6 +7,7 @@ const PilotState = Annotation.Root({
   aiAnalysisNoteId: Annotation,
   diagnosis: Annotation,
   decision: Annotation,
+  approvalDecisions: Annotation,
   committedIds: Annotation,
   trace: Annotation({
     reducer: (left, right) => [...left, ...right],
@@ -65,32 +66,55 @@ export function createDiagnosisTools(baseUrl) {
 }
 
 export function createApprovalCommitTools(baseUrl) {
+  async function applyDecisions(aiAnalysisNoteId, decisions) {
+    let { aiAnalysisNote: note } = await requestJson(
+      baseUrl,
+      `/api/ai-analysis-notes/${encodeURIComponent(aiAnalysisNoteId)}`,
+    );
+    const committedIds = { weaknesses: [], tasks: [], ignored: [] };
+    for (const decision of decisions.filter((item) => item.candidateType === "weakness")) {
+      const result = await postJson(
+        baseUrl,
+        `/api/ai-analysis-notes/${encodeURIComponent(aiAnalysisNoteId)}/candidate-actions`,
+        decision,
+      );
+      note = result.aiAnalysisNote;
+      if (result.weakness?.id) committedIds.weaknesses.push(result.weakness.id);
+      if (decision.action === "ignore") committedIds.ignored.push(`weakness:${decision.candidateId}`);
+    }
+    for (const decision of decisions.filter((item) => item.candidateType === "training_task")) {
+      const result = await postJson(
+        baseUrl,
+        `/api/ai-analysis-notes/${encodeURIComponent(aiAnalysisNoteId)}/candidate-actions`,
+        decision,
+      );
+      note = result.aiAnalysisNote;
+      if (result.task?.id) committedIds.tasks.push(result.task.id);
+      if (decision.action === "ignore") committedIds.ignored.push(`training_task:${decision.candidateId}`);
+    }
+    return committedIds;
+  }
+
   return Object.freeze({
+    applyDecisions,
     async acceptAll(aiAnalysisNoteId) {
-      let { aiAnalysisNote: note } = await requestJson(
+      const { aiAnalysisNote: note } = await requestJson(
         baseUrl,
         `/api/ai-analysis-notes/${encodeURIComponent(aiAnalysisNoteId)}`,
       );
-      const committedIds = { weaknesses: [], tasks: [] };
-      for (const candidate of note.weaknessCandidates || []) {
-        const result = await postJson(
-          baseUrl,
-          `/api/ai-analysis-notes/${encodeURIComponent(aiAnalysisNoteId)}/candidate-actions`,
-          { candidateType: "weakness", candidateId: candidate.id, action: "accept" },
-        );
-        note = result.aiAnalysisNote;
-        if (result.weakness?.id) committedIds.weaknesses.push(result.weakness.id);
-      }
-      for (const candidate of note.trainingTaskCandidates || []) {
-        const result = await postJson(
-          baseUrl,
-          `/api/ai-analysis-notes/${encodeURIComponent(aiAnalysisNoteId)}/candidate-actions`,
-          { candidateType: "training_task", candidateId: candidate.id, action: "accept" },
-        );
-        note = result.aiAnalysisNote;
-        if (result.task?.id) committedIds.tasks.push(result.task.id);
-      }
-      return committedIds;
+      const decisions = [
+        ...(note.weaknessCandidates || []).map((candidate) => ({
+          candidateType: "weakness",
+          candidateId: candidate.id,
+          action: "accept",
+        })),
+        ...(note.trainingTaskCandidates || []).map((candidate) => ({
+          candidateType: "training_task",
+          candidateId: candidate.id,
+          action: "accept",
+        })),
+      ];
+      return applyDecisions(aiAnalysisNoteId, decisions);
     },
   });
 }
@@ -119,28 +143,101 @@ function createReviewSpecialistNode(diagnosisTools) {
   };
 }
 
+function allCandidateKeys(diagnosis) {
+  return [
+    ...(diagnosis.weaknessCandidates || []).map((candidate) => `weakness:${candidate.id}`),
+    ...(diagnosis.trainingTaskCandidates || []).map((candidate) => `training_task:${candidate.id}`),
+  ];
+}
+
+function allAcceptedDecisions(diagnosis) {
+  return [
+    ...(diagnosis.weaknessCandidates || []).map((candidate) => ({
+      candidateType: "weakness",
+      candidateId: candidate.id,
+      action: "accept",
+    })),
+    ...(diagnosis.trainingTaskCandidates || []).map((candidate) => ({
+      candidateType: "training_task",
+      candidateId: candidate.id,
+      action: "accept",
+    })),
+  ];
+}
+
+function validateApprovalDecisions(diagnosis, decisions) {
+  if (!Array.isArray(decisions)) throw new Error("审批决定必须覆盖全部候选");
+  const expected = allCandidateKeys(diagnosis);
+  const normalized = decisions.map((decision) => ({
+    candidateType: String(decision?.candidateType || ""),
+    candidateId: String(decision?.candidateId || ""),
+    action: String(decision?.action || ""),
+  }));
+  const supplied = normalized.map((decision) => `${decision.candidateType}:${decision.candidateId}`);
+  if (
+    supplied.length !== expected.length ||
+    new Set(supplied).size !== supplied.length ||
+    expected.some((key) => !supplied.includes(key)) ||
+    normalized.some((decision) => !["accept", "ignore"].includes(decision.action))
+  ) {
+    throw new Error("请为每条诊断候选明确选择采纳或忽略");
+  }
+  const weaknessActions = new Map(
+    normalized
+      .filter((decision) => decision.candidateType === "weakness")
+      .map((decision) => [decision.candidateId, decision.action]),
+  );
+  for (const candidate of diagnosis.trainingTaskCandidates || []) {
+    const action = normalized.find(
+      (decision) => decision.candidateType === "training_task" && decision.candidateId === candidate.id,
+    )?.action;
+    if (
+      action === "accept" &&
+      candidate.weaknessCandidateId &&
+      weaknessActions.get(candidate.weaknessCandidateId) !== "accept"
+    ) {
+      throw new Error("采纳训练任务前，请同时采纳其关联的能力缺陷");
+    }
+  }
+  return normalized;
+}
+
 function approvalGate(state) {
-  const decision = interrupt({
+  const approval = interrupt({
     type: "review_diagnosis_approval",
     workflowRunId: state.workflowRunId,
     aiAnalysisNoteId: state.aiAnalysisNoteId,
     diagnosis: state.diagnosis,
-    acceptedDecisions: ["accept_all", "defer"],
+    acceptedActions: ["commit", "accept_all", "defer"],
   });
-  if (!["accept_all", "defer"].includes(decision.action)) {
+  if (approval.action === "defer") {
+    return { decision: "defer", approvalDecisions: [], trace: ["approval_gate:defer"] };
+  }
+  if (approval.action === "accept_all") {
+    return {
+      decision: "accept_all",
+      approvalDecisions: allAcceptedDecisions(state.diagnosis),
+      trace: ["approval_gate:accept_all"],
+    };
+  }
+  if (approval.action !== "commit") {
     throw new Error("Unsupported approval action");
   }
-  return { decision: decision.action, trace: [`approval_gate:${decision.action}`] };
+  return {
+    decision: "commit",
+    approvalDecisions: validateApprovalDecisions(state.diagnosis, approval.decisions),
+    trace: ["approval_gate:commit"],
+  };
 }
 
 function createApprovalCommitNode(commitTools) {
-  assert.deepEqual(Object.keys(commitTools), ["acceptAll"]);
+  assert.deepEqual(Object.keys(commitTools), ["applyDecisions", "acceptAll"]);
   return async (state) => {
     if (state.decision === "defer") {
-      return { committedIds: { weaknesses: [], tasks: [] }, trace: ["approval_commit:deferred"] };
+      return { committedIds: { weaknesses: [], tasks: [], ignored: [] }, trace: ["approval_commit:deferred"] };
     }
     return {
-      committedIds: await commitTools.acceptAll(state.aiAnalysisNoteId),
+      committedIds: await commitTools.applyDecisions(state.aiAnalysisNoteId, state.approvalDecisions),
       trace: ["approval_commit:accepted"],
     };
   };
@@ -166,7 +263,32 @@ export async function startReviewPilot(graph, workflowRunId) {
 
 export async function resumeReviewPilot(graph, workflowRunId, action) {
   return graph.invoke(
-    new Command({ resume: { action } }),
+    new Command({ resume: typeof action === "string" ? { action } : action }),
     { configurable: { thread_id: workflowRunId } },
   );
+}
+
+export async function readReviewPilotSummary(graph, workflowRunId) {
+  const snapshot = await graph.getState({ configurable: { thread_id: workflowRunId } });
+  const values = snapshot.values || {};
+  if (!values.workflowRunId) {
+    return {
+      workflowRunId,
+      status: "not_started",
+      aiAnalysisNoteId: "",
+      diagnosis: null,
+      decision: "",
+      committedIds: { weaknesses: [], tasks: [], ignored: [] },
+      trace: [],
+    };
+  }
+  return {
+    workflowRunId,
+    status: values.decision ? "completed" : values.diagnosis ? "waiting_for_approval" : "running",
+    aiAnalysisNoteId: values.aiAnalysisNoteId || "",
+    diagnosis: values.diagnosis || null,
+    decision: values.decision || "",
+    committedIds: values.committedIds || { weaknesses: [], tasks: [], ignored: [] },
+    trace: values.trace || [],
+  };
 }

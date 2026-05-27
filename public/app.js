@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.22";
+const APP_VERSION = "v0.27";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -608,6 +608,8 @@ const state = {
   portfolioPreviewMode: false,
   aiAnalysisNotes: [],
   workflowRuns: [],
+  workflowRuntimeById: {},
+  workflowRuntimeDecisions: {},
   aiFrontierCards: [],
   rhythmLogs: [],
   systemSnapshot: null,
@@ -665,6 +667,9 @@ const state = {
   savingPortfolioProject: false,
   savingAiAnalysisNote: false,
   savingWorkflowRun: false,
+  loadingWorkflowRuntimeId: null,
+  startingWorkflowRuntime: false,
+  resumingWorkflowRuntime: false,
   runningAiDiagnosis: false,
   parsingAiCandidates: false,
   actingAiCandidateId: null,
@@ -1415,6 +1420,7 @@ function openWorkflowRun(id) {
   state.activeModule = "workflow";
   state.selectedWorkflowRunId = id;
   render();
+  loadWorkflowRuntime(id);
 }
 
 function openAiFrontierCard(id) {
@@ -1798,6 +1804,109 @@ async function refreshWorkflowState() {
   state.systemSnapshot = snapshotPayload?.snapshot || state.systemSnapshot;
 }
 
+async function refreshWorkflowRuntimeRecords() {
+  const [workflowPayload, notesPayload, weaknessesPayload, tasksPayload, snapshotPayload] = await Promise.all([
+    api("/api/workflow-runs"),
+    api("/api/ai-analysis-notes"),
+    api("/api/weaknesses"),
+    api("/api/training-tasks"),
+    api("/api/system-snapshot").catch(() => null),
+  ]);
+  state.workflowRuns = workflowPayload.workflowRuns || [];
+  state.aiAnalysisNotes = notesPayload.aiAnalysisNotes || [];
+  state.weaknesses = weaknessesPayload.weaknesses || [];
+  state.trainingTasks = tasksPayload.tasks || [];
+  state.systemSnapshot = snapshotPayload?.snapshot || state.systemSnapshot;
+}
+
+async function loadWorkflowRuntime(id) {
+  if (!id || state.loadingWorkflowRuntimeId === id) return;
+  state.loadingWorkflowRuntimeId = id;
+  render();
+  try {
+    const result = await api(`/api/workflow-runs/${encodeURIComponent(id)}/runtime`);
+    state.workflowRuntimeById[id] = result.runtime;
+    if (result.runtime.status !== "waiting_for_approval") {
+      state.workflowRuntimeDecisions[id] = {};
+    }
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    if (state.loadingWorkflowRuntimeId === id) state.loadingWorkflowRuntimeId = null;
+    render();
+  }
+}
+
+async function startSelectedWorkflowRuntime() {
+  const run = selectedWorkflowRun();
+  if (!run || state.startingWorkflowRuntime) return;
+  state.startingWorkflowRuntime = true;
+  render();
+  try {
+    const result = await api(`/api/workflow-runs/${encodeURIComponent(run.id)}/runtime/start`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    state.workflowRuntimeById[run.id] = result.runtime;
+    state.workflowRuntimeDecisions[run.id] = {};
+    await refreshWorkflowRuntimeRecords();
+    showToast("受控诊断已生成，请逐条确认候选");
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    state.startingWorkflowRuntime = false;
+    render();
+  }
+}
+
+function setWorkflowRuntimeDecision(control) {
+  const run = selectedWorkflowRun();
+  if (!run) return;
+  const key = `${control.dataset.runtimeCandidateType}:${control.dataset.runtimeCandidateId}`;
+  state.workflowRuntimeDecisions[run.id] = {
+    ...(state.workflowRuntimeDecisions[run.id] || {}),
+    [key]: control.value,
+  };
+  render();
+}
+
+async function resumeSelectedWorkflowRuntime() {
+  const run = selectedWorkflowRun();
+  const runtime = run ? state.workflowRuntimeById[run.id] : null;
+  if (!run || runtime?.status !== "waiting_for_approval" || state.resumingWorkflowRuntime) return;
+  const selected = state.workflowRuntimeDecisions[run.id] || {};
+  const candidates = [
+    ...(runtime.diagnosis?.weaknessCandidates || []).map((candidate) => ["weakness", candidate.id]),
+    ...(runtime.diagnosis?.trainingTaskCandidates || []).map((candidate) => ["training_task", candidate.id]),
+  ];
+  const decisions = candidates.map(([candidateType, candidateId]) => ({
+    candidateType,
+    candidateId,
+    action: selected[`${candidateType}:${candidateId}`] || "",
+  }));
+  if (decisions.some((decision) => !decision.action)) {
+    showInfo("请先为每条候选选择采纳或忽略");
+    return;
+  }
+  state.resumingWorkflowRuntime = true;
+  render();
+  try {
+    const result = await api(`/api/workflow-runs/${encodeURIComponent(run.id)}/runtime/resume`, {
+      method: "POST",
+      body: JSON.stringify({ action: "commit", decisions }),
+    });
+    state.workflowRuntimeById[run.id] = result.runtime;
+    state.workflowRuntimeDecisions[run.id] = {};
+    await refreshWorkflowRuntimeRecords();
+    showToast("审批已提交，采纳项已进入修复流程");
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    state.resumingWorkflowRuntime = false;
+    render();
+  }
+}
+
 async function startWorkflowFromSelectedReview() {
   const review = selectedReview();
   if (!review?.id || state.reviewDraft) {
@@ -1814,6 +1923,7 @@ async function startWorkflowFromSelectedReview() {
     await refreshWorkflowState();
     state.selectedWorkflowRunId = result.workflowRun.id;
     state.activeModule = "workflow";
+    loadWorkflowRuntime(result.workflowRun.id);
     showToast(result.created ? "修复流程已开启" : "已打开现有修复流程");
   } catch (error) {
     showError(error.message);
@@ -2078,6 +2188,9 @@ function beginReviewForSelectedInterview() {
 function switchModule(module) {
   state.activeModule = module;
   render();
+  if (module === "workflow" && state.selectedWorkflowRunId) {
+    loadWorkflowRuntime(state.selectedWorkflowRunId);
+  }
 }
 
 function hasOpenInterview(opportunityId) {
@@ -3505,6 +3618,14 @@ function attachCommonEvents() {
   });
   document.querySelectorAll("[data-workflow-action]").forEach((button) => {
     button.addEventListener("click", () => updateSelectedWorkflow(button.dataset.workflowAction));
+  });
+  document.querySelector("#start-workflow-runtime-btn")?.addEventListener("click", startSelectedWorkflowRuntime);
+  document.querySelector("#resume-workflow-runtime-btn")?.addEventListener("click", resumeSelectedWorkflowRuntime);
+  document.querySelectorAll("[data-workflow-runtime-refresh]").forEach((button) => {
+    button.addEventListener("click", () => loadWorkflowRuntime(button.dataset.workflowRuntimeRefresh));
+  });
+  document.querySelectorAll("[data-runtime-candidate-type]").forEach((control) => {
+    control.addEventListener("change", () => setWorkflowRuntimeDecision(control));
   });
   document.querySelector("#new-weakness-btn")?.addEventListener("click", () => beginNewWeakness());
   document.querySelectorAll(".new-training-task-btn").forEach((button) => {
@@ -5505,6 +5626,121 @@ function renderPostInterview() {
   `;
 }
 
+function renderWorkflowRuntime(run) {
+  const runtime = state.workflowRuntimeById[run.id];
+  const loading = state.loadingWorkflowRuntimeId === run.id;
+  if (!runtime) {
+    return `
+      <div class="workflow-runtime workflow-block">
+        <div class="runtime-heading">
+          <h3>受控 AI Runtime</h3>
+          <button class="btn compact" type="button" data-workflow-runtime-refresh="${escapeHtml(run.id)}"${disabledAttr(loading)}>${loading ? "读取中..." : "读取状态"}</button>
+        </div>
+        <p class="mini-meta">${loading ? "正在读取 LangGraph 运行状态。" : "读取后可以从本流程启动受控诊断。"}</p>
+      </div>
+    `;
+  }
+
+  if (runtime.status === "not_started" || runtime.status === "running") {
+    return `
+      <div class="workflow-runtime workflow-block">
+        <div class="runtime-heading">
+          <h3>受控 AI Runtime</h3>
+          <span class="tag ${runtime.status === "running" ? "workflow-candidate_confirmation" : "candidate-pending"}">${runtime.status === "running" ? "等待重试" : "尚未启动"}</span>
+        </div>
+        <p class="mini-meta">${runtime.status === "running" ? "上一次诊断未完成，可以重新启动并继续等待人工审批。" : "诊断会在生成候选后暂停，只有你确认采纳的内容才写入档案。"}</p>
+        <div class="actions candidate-actions">
+          <button class="btn primary" id="start-workflow-runtime-btn" type="button"${disabledAttr(state.startingWorkflowRuntime)}>${state.startingWorkflowRuntime ? "生成中..." : "生成受控诊断"}</button>
+          <button class="btn" type="button" data-workflow-runtime-refresh="${escapeHtml(run.id)}"${disabledAttr(loading)}>${loading ? "刷新中..." : "刷新状态"}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  if (runtime.status === "completed") {
+    const committed = runtime.committedIds || {};
+    const decisionLabel = runtime.decision === "defer" ? "已暂缓" : "审批已提交";
+    return `
+      <div class="workflow-runtime workflow-block">
+        <div class="runtime-heading">
+          <h3>受控 AI Runtime</h3>
+          <span class="tag candidate-accepted">${decisionLabel}</span>
+        </div>
+        <p class="mini-meta">已创建缺陷 ${committed.weaknesses?.length || 0} 条，训练任务 ${committed.tasks?.length || 0} 条，忽略候选 ${committed.ignored?.length || 0} 条。</p>
+        <div class="actions candidate-actions">
+          <button class="btn" type="button" data-workflow-runtime-refresh="${escapeHtml(run.id)}"${disabledAttr(loading)}>${loading ? "刷新中..." : "刷新 Runtime"}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  const decisions = state.workflowRuntimeDecisions[run.id] || {};
+  const weaknesses = runtime.diagnosis?.weaknessCandidates || [];
+  const tasks = runtime.diagnosis?.trainingTaskCandidates || [];
+  const candidateCount = weaknesses.length + tasks.length;
+  const chosenCount = [...weaknesses.map((candidate) => `weakness:${candidate.id}`), ...tasks.map((candidate) => `training_task:${candidate.id}`)]
+    .filter((key) => decisions[key])
+    .length;
+  const option = (value, selected, label) => `<option value="${value}"${selected === value ? " selected" : ""}>${label}</option>`;
+  const selection = (candidateType, candidateId) => {
+    const value = decisions[`${candidateType}:${candidateId}`] || "";
+    return `
+      <select class="runtime-decision-select" data-runtime-candidate-type="${candidateType}" data-runtime-candidate-id="${escapeHtml(candidateId)}" aria-label="选择审批决定">
+        <option value=""${value ? "" : " selected"}>请选择决定</option>
+        ${option("accept", value, "采纳")}
+        ${option("ignore", value, "忽略")}
+      </select>
+    `;
+  };
+  return `
+    <div class="workflow-runtime workflow-block">
+      <div class="runtime-heading">
+        <h3>受控 AI Runtime</h3>
+        <span class="tag workflow-candidate_confirmation">等待人工审批</span>
+      </div>
+      <div class="candidate-summary">
+        <strong>诊断摘要</strong>
+        <p>${escapeHtml(runtime.diagnosis?.summary || "已生成候选，请逐条审核。")}</p>
+      </div>
+      <div class="candidate-columns runtime-candidates">
+        <div class="candidate-group">
+          <h4>能力缺陷候选</h4>
+          ${weaknesses.map((candidate) => `
+            <div class="candidate-card">
+              <div class="candidate-head">
+                <strong>${escapeHtml(candidate.title)}</strong>
+                <span class="tag candidate-pending">${escapeHtml(candidate.severity || "medium")}</span>
+              </div>
+              <p>${escapeHtml(candidate.description || candidate.evidence || "暂无补充说明")}</p>
+              ${selection("weakness", candidate.id)}
+            </div>
+          `).join("") || `<p class="mini-meta">没有缺陷候选。</p>`}
+        </div>
+        <div class="candidate-group">
+          <h4>训练任务候选</h4>
+          ${tasks.map((candidate) => `
+            <div class="candidate-card">
+              <div class="candidate-head">
+                <strong>${escapeHtml(candidate.title)}</strong>
+                <span class="tag candidate-pending">训练</span>
+              </div>
+              <p>${escapeHtml(candidate.targetAbility || candidate.practiceOutput || "暂无训练目标")}</p>
+              ${selection("training_task", candidate.id)}
+            </div>
+          `).join("") || `<p class="mini-meta">没有训练候选。</p>`}
+        </div>
+      </div>
+      <div class="runtime-approval-footer">
+        <p class="mini-meta">已选择 ${chosenCount} / ${candidateCount} 条；采纳训练任务需要同步采纳关联缺陷。</p>
+        <div class="actions candidate-actions">
+          <button class="btn" type="button" data-workflow-runtime-refresh="${escapeHtml(run.id)}"${disabledAttr(loading || state.resumingWorkflowRuntime)}>刷新状态</button>
+          <button class="btn primary" id="resume-workflow-runtime-btn" type="button"${disabledAttr(chosenCount !== candidateCount || state.resumingWorkflowRuntime)}>${state.resumingWorkflowRuntime ? "提交中..." : "提交审批决定"}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderWorkflow() {
   const run = selectedWorkflowRun();
   const active = state.workflowRuns.filter((item) => !["completed", "paused"].includes(item.status)).length;
@@ -5602,6 +5838,7 @@ function renderWorkflowDetail(run) {
           <button class="btn" id="open-workflow-review-btn" type="button">查看复盘</button>
           <button class="btn primary" id="open-workflow-ai-btn" type="button">${aiNote ? "查看 AI 诊断" : "建立 AI 诊断"}</button>
         </div>
+        ${renderWorkflowRuntime(run)}
         <div class="workflow-relations">
           <div class="workflow-block">
             <h3>关联资产</h3>

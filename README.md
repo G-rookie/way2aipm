@@ -2,7 +2,7 @@
 
 一个面向 AI PM 求职与成长的本地 Markdown 工作台。
 
-## 当前版本：v0.26
+## 当前版本：v0.27
 
 当前版本已经覆盖：
 
@@ -45,11 +45,12 @@
 - 总控/复盘专项 Agent 委派实验与 Runtime 限制结论
 - LangGraph 节点工具隔离与审批中断/恢复对照验证
 - LangGraph 持久 checkpoint 与受控复盘闭环试点
+- Workflow 页面内的 LangGraph Runtime 启动、逐条审批与失败重试
 
-暂不实现登录、云同步、公开发布、删除能力和自动采纳 AI 建议。v0.26 已验证 LangGraph 可持久等待审批、从新 runner 恢复，并仅在明确批准后复用现有接口写入缺陷与训练任务；当前试点仍通过命令行运行，页面入口留到后续版本。
+暂不实现登录、云同步、公开发布、删除能力和自动采纳 AI 建议。v0.27 已将 LangGraph 受控复盘闭环接入 Workflow 页面：诊断在候选生成后暂停等待你逐条决定，只有明确采纳项会写入缺陷与训练任务；模型调用临时失败时可以从页面重试。
 
 项目后续路线见 [Roadmap](docs/roadmap.zh.md)。
-Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，Agent Runtime 选型决策见 [Agent Runtime 技术决策](docs/agent-runtime-decision.zh.md)，对照实验见 [v0.23 OpenClaw 验证记录](docs/v0.23-openclaw-validation.zh.md)、[v0.24 OpenClaw Agent 验证记录](docs/v0.24-openclaw-agent-validation.zh.md)、[v0.25 LangGraph 验证记录](docs/v0.25-langgraph-validation.zh.md) 与 [v0.26 LangGraph 试点验证记录](docs/v0.26-langgraph-pilot-validation.zh.md)。
+Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow-architecture.zh.md)，Agent Runtime 选型决策见 [Agent Runtime 技术决策](docs/agent-runtime-decision.zh.md)，对照实验见 [v0.23 OpenClaw 验证记录](docs/v0.23-openclaw-validation.zh.md)、[v0.24 OpenClaw Agent 验证记录](docs/v0.24-openclaw-agent-validation.zh.md)、[v0.25 LangGraph 验证记录](docs/v0.25-langgraph-validation.zh.md)、[v0.26 LangGraph 试点验证记录](docs/v0.26-langgraph-pilot-validation.zh.md) 与 [v0.27 Runtime 页面验证记录](docs/v0.27-langgraph-runtime-ui-validation.zh.md)。
 
 ## 版本状态
 
@@ -79,6 +80,7 @@ Agent 与 Workflow 架构见 [Agent + Workflow Architecture](docs/agent-workflow
 - `v0.24`：总控/复盘专项 Agent 委派验证、无业务写入检查与 Runtime 限制结论
 - `v0.25`：LangGraph 节点工具隔离、interrupt/resume 审批与 WorkflowRun 线程映射验证
 - `v0.26`：LangGraph 磁盘 checkpoint、真实诊断 API 路径与批准后幂等写回试点
+- `v0.27`：Workflow 页面 Runtime 入口、候选逐条审批、依赖校验与失败重试
 
 ## 启动
 
@@ -123,18 +125,17 @@ OPENAI_MODEL=你要使用的模型_ID
 # OPENAI_RESPONSES_URL=http://127.0.0.1:4362/v1/responses
 ```
 
-## LangGraph 试点
+## LangGraph Runtime
 
-v0.26 为已有 Workflow Run 提供命令行受控试点。应用服务运行并配置模型后，可执行：
+v0.27 已在 Workflow 页面中提供受控诊断入口。进入一条修复流程后，点击“生成受控诊断”，页面会在候选生成后显示待审批状态；逐条选择采纳或忽略并提交后，才会将采纳项写入 Markdown 业务记录。
 
-```powershell
-$env:WAY2AIPM_BASE_URL='http://localhost:4173'
-$env:WAY2AIPM_LANGGRAPH_CHECKPOINT_PATH='D:\code\way2aipm\runtime\langgraph\checkpoints.json'
-node integrations/langgraph/review-pilot-runner.mjs start <workflowRunId>
-node integrations/langgraph/review-pilot-runner.mjs resume <workflowRunId> accept_all
+运行 checkpoint 默认保存在被 Git 忽略的 `runtime/langgraph/checkpoints.json`。如需为本地环境指定明确文件位置，可在 `.env.local` 设置：
+
+```dotenv
+WAY2AIPM_LANGGRAPH_CHECKPOINT_PATH=D:\code\way2aipm\runtime\langgraph\checkpoints.json
 ```
 
-`start` 会在候选生成后中断等待明确审批；`accept_all` 才会创建缺陷和训练任务。运行 checkpoint 保存于被 Git 忽略的 `runtime/` 目录，不替代 Markdown 业务记录。
+命令行 runner 仍保留用于回归排查；它不会替代页面审批，也不会让 checkpoint 取代 Markdown 业务记录。
 
 ## 数据存储
 

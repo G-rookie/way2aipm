@@ -1,11 +1,12 @@
 {
   "name": "@way2aipm/langgraph-evaluation",
-  "version": "0.26.0",
+  "version": "0.27.0",
   "private": true,
   "type": "module",
   "scripts": {
     "smoke": "node workflow-interrupt-smoke-test.mjs",
-    "smoke:pilot": "node review-pilot-smoke-test.mjs"
+    "smoke:pilot": "node review-pilot-smoke-test.mjs",
+    "smoke:runtime-api": "node runtime-api-smoke-test.mjs"
   },
   "dependencies": {
     "@langchain/langgraph": "^1.0.0",

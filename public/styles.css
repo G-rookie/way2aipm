@@ -1177,6 +1177,36 @@ textarea:focus {
   font-size: 14px;
 }
 
+.workflow-runtime {
+  background: var(--surface);
+}
+
+.runtime-heading,
+.runtime-approval-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.runtime-candidates {
+  margin-top: 2px;
+}
+
+.runtime-decision-select {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.runtime-approval-footer {
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.runtime-approval-footer p {
+  margin: 0;
+}
+
 .relation-button {
   width: 100%;
   border: 1px solid var(--line);
