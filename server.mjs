@@ -39,6 +39,7 @@ const AI_ANALYSIS_NOTES_DIR = path.join(CONTENT_DIR, "ai-analysis-notes");
 const AI_FRONTIER_CARDS_DIR = path.join(CONTENT_DIR, "ai-frontier-cards");
 const RHYTHM_LOGS_DIR = path.join(CONTENT_DIR, "rhythm-logs");
 const WORKFLOW_RUNS_DIR = path.join(CONTENT_DIR, "workflow-runs");
+const AGENT_ROUTER_RUNS_DIR = path.join(CONTENT_DIR, "agent-router-runs");
 const LANGGRAPH_CHECKPOINT_PATH = path.resolve(
   String(process.env.WAY2AIPM_LANGGRAPH_CHECKPOINT_PATH || path.join(__dirname, "runtime", "langgraph", "checkpoints.json")),
 );
@@ -364,6 +365,7 @@ async function ensureContentDirs() {
   await mkdir(AI_FRONTIER_CARDS_DIR, { recursive: true });
   await mkdir(RHYTHM_LOGS_DIR, { recursive: true });
   await mkdir(WORKFLOW_RUNS_DIR, { recursive: true });
+  await mkdir(AGENT_ROUTER_RUNS_DIR, { recursive: true });
 }
 
 function slugify(value) {
@@ -484,6 +486,13 @@ function createWorkflowRunId(title) {
   return `flow_${stamp}_${seed}_${random}`;
 }
 
+function createAgentRouterRunId(intentText) {
+  const seed = slugify(intentText).slice(0, 42) || "route";
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 7);
+  return `aroute_${stamp}_${seed}_${random}`;
+}
+
 function sanitizeId(id, prefix) {
   const value = String(id || "");
   const pattern = new RegExp(`^${prefix}_[a-zA-Z0-9_\\-\\u4e00-\\u9fa5]+$`);
@@ -585,6 +594,12 @@ function workflowRunPath(id) {
   const safeId = sanitizeId(id, "flow");
   if (!safeId) return null;
   return path.join(WORKFLOW_RUNS_DIR, `${safeId}.md`);
+}
+
+function agentRouterRunPath(id) {
+  const safeId = sanitizeId(id, "aroute");
+  if (!safeId) return null;
+  return path.join(AGENT_ROUTER_RUNS_DIR, `${safeId}.md`);
 }
 
 function normalizeOpportunity(input, existing = {}) {
@@ -1207,6 +1222,105 @@ function normalizeWorkflowRun(input, existing = {}, review = {}) {
   };
 }
 
+function classifyAgentIntent(intentText, data = {}) {
+  const text = String(intentText || "").trim();
+  const lower = text.toLowerCase();
+  const includesAny = (terms) => terms.some((term) => lower.includes(term));
+  const reviewTerms = ["复盘", "面试后", "挂点", "失败", "没过", "缺陷", "训练", "修复", "review", "weakness"];
+  const preparationTerms = ["准备", "面试前", "brief", "jd", "一面", "二面", "三面", "hr", "题目", "项目映射", "preparation"];
+  const portfolioTerms = ["作品集", "公开", "showcase", "portfolio", "发布", "脱敏"];
+  const reviewScore = reviewTerms.filter((term) => lower.includes(term)).length;
+  const preparationScore = preparationTerms.filter((term) => lower.includes(term)).length;
+  const portfolioScore = portfolioTerms.filter((term) => lower.includes(term)).length;
+  const hasReviews = (data.reviews || []).length > 0;
+  const hasInterviews = (data.interviews || []).length > 0;
+
+  if (!text) {
+    return {
+      selectedAgent: "manual",
+      routeType: "clarify_intent",
+      confidence: "low",
+      targetModule: "agentRuntime",
+      actionLabel: "补充目标",
+      reason: "还没有输入目标，总 Agent 需要先知道你想推进哪类工作。",
+      prerequisites: ["输入一句当前想完成的任务"],
+      nextStep: "写下目标，例如：我想复盘刚才的一面，或者我想准备下一轮 HR 面。",
+    };
+  }
+
+  if (reviewScore >= preparationScore && reviewScore > 0) {
+    return {
+      selectedAgent: "review_specialist",
+      routeType: "review_diagnosis",
+      confidence: reviewScore >= 2 ? "high" : "medium",
+      targetModule: hasReviews ? "workflow" : "postInterview",
+      actionLabel: hasReviews ? "打开流程运行" : "去复盘室补复盘",
+      reason: "目标中出现复盘、挂点、缺陷或训练修复信号，适合进入面试后修复链路。",
+      prerequisites: hasReviews ? ["选择或创建 WorkflowRun", "生成受控诊断", "逐条审批候选"] : ["先保存一份面试复盘"],
+      nextStep: hasReviews ? "进入 WF 流程运行，选择复盘对应流程并生成受控诊断。" : "进入面试后复盘室，保存复盘后开启修复流程。",
+    };
+  }
+
+  if (preparationScore > 0) {
+    return {
+      selectedAgent: "preparation_specialist",
+      routeType: "interview_preparation",
+      confidence: preparationScore >= 2 ? "high" : "medium",
+      targetModule: hasInterviews ? "preInterview" : "pipeline",
+      actionLabel: hasInterviews ? "去面试前作战室" : "先补面试轮次",
+      reason: "目标中出现面试准备、JD、轮次或题目预测信号，适合进入面试前 Brief 建议链路。",
+      prerequisites: hasInterviews ? ["选择一轮面试", "生成准备建议", "逐项审批 Brief 字段"] : ["先创建岗位机会和面试轮次"],
+      nextStep: hasInterviews ? "进入面试前作战室，选择面试轮次并生成准备建议。" : "进入求职中台，为岗位补充面试轮次后再启动准备 Agent。",
+    };
+  }
+
+  if (portfolioScore > 0) {
+    return {
+      selectedAgent: "manual",
+      routeType: "portfolio_publish",
+      confidence: portfolioScore >= 2 ? "medium" : "low",
+      targetModule: "portfolio",
+      actionLabel: "去作品集产品线",
+      reason: "目标更接近作品集整理或公开展示，目前没有专属 Agent，建议走手动作品集流程。",
+      prerequisites: ["整理作品集资料", "项目卡进入作品集", "项目卡完成脱敏并设为可展示"],
+      nextStep: "进入作品集产品线，检查公开展示门禁和项目脱敏状态。",
+    };
+  }
+
+  return {
+    selectedAgent: "manual",
+    routeType: "manual_triage",
+    confidence: "low",
+    targetModule: "agentRuntime",
+    actionLabel: "回到 Agent 总控",
+    reason: "目标没有明显命中已接入的复盘或面试前 Agent，先保持人工判断。",
+    prerequisites: ["明确是要准备面试、复盘面试，还是整理作品集/其他模块"],
+    nextStep: "在 Agent 总控中补充更具体目标，或直接进入对应模块手动处理。",
+  };
+}
+
+function normalizeAgentRouterRun(input = {}, existing = {}, data = {}) {
+  const now = new Date().toISOString();
+  const intentText = String(input.intentText ?? existing.intentText ?? "").trim();
+  const route = input.route && typeof input.route === "object" ? input.route : classifyAgentIntent(intentText, data);
+  return {
+    id: existing.id || input.id || createAgentRouterRunId(intentText),
+    type: "agentRouterRun",
+    intentText,
+    selectedAgent: String(route.selectedAgent || "manual"),
+    routeType: String(route.routeType || "manual_triage"),
+    confidence: String(route.confidence || "low"),
+    targetModule: String(route.targetModule || "agentRuntime"),
+    actionLabel: String(route.actionLabel || "查看建议"),
+    reason: String(route.reason || ""),
+    prerequisites: Array.isArray(route.prerequisites) ? route.prerequisites.map((item) => String(item)) : [],
+    nextStep: String(route.nextStep || ""),
+    status: String(input.status ?? existing.status ?? "routed"),
+    createdAt: existing.createdAt || input.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 function normalizeAiFrontierCard(input, existing = {}) {
   const now = new Date().toISOString();
   const topic = String(input.topic ?? existing.topic ?? "").trim();
@@ -1410,6 +1524,13 @@ function workflowRunToMarkdown(run) {
   return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 当前状态\n\n${run.status} / ${run.currentStep}\n\n## 时间线\n\n${timeline}\n\n## 闭环总结\n\n${run.summary}\n`;
 }
 
+function agentRouterRunToMarkdown(run) {
+  const frontMatter = JSON.stringify(run, null, 2);
+  const title = markdownEscapeTitle(`Agent 路由 - ${run.routeType}`);
+
+  return `---\n${frontMatter}\n---\n\n# ${title}\n\n## 用户目标\n\n${run.intentText}\n\n## 路由建议\n\n- 推荐 Agent：${run.selectedAgent}\n- 路由类型：${run.routeType}\n- 置信度：${run.confidence}\n- 目标模块：${run.targetModule}\n\n## 原因\n\n${run.reason}\n\n## 前置条件\n\n${(run.prerequisites || []).map((item) => `- ${item}`).join("\n") || "暂无"}\n\n## 下一步\n\n${run.nextStep}\n`;
+}
+
 function parseMarkdown(raw) {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!match) {
@@ -1510,6 +1631,12 @@ async function readRhythmLogFile(filePath) {
 }
 
 async function readWorkflowRunFile(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const { frontMatter } = parseMarkdown(raw);
+  return frontMatter;
+}
+
+async function readAgentRouterRunFile(filePath) {
   const raw = await readFile(filePath, "utf8");
   const { frontMatter } = parseMarkdown(raw);
   return frontMatter;
@@ -2138,6 +2265,42 @@ async function listWorkflowRuns(filters = {}) {
   return filtered;
 }
 
+async function listAgentRouterRuns() {
+  await ensureContentDirs();
+  const entries = await readdir(AGENT_ROUTER_RUNS_DIR, { withFileTypes: true });
+  const runs = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    try {
+      const item = await readAgentRouterRunFile(path.join(AGENT_ROUTER_RUNS_DIR, entry.name));
+      if (item.type === "agentRouterRun") {
+        runs.push(item);
+      }
+    } catch (error) {
+      runs.push({
+        id: entry.name.replace(/\.md$/, ""),
+        type: "agentRouterRun",
+        intentText: "读取失败",
+        selectedAgent: "manual",
+        routeType: "read_error",
+        confidence: "low",
+        targetModule: "agentRuntime",
+        actionLabel: "查看错误",
+        reason: error.message,
+        prerequisites: [],
+        nextStep: "",
+        status: "error",
+        updatedAt: "",
+        readError: error.message,
+      });
+    }
+  }
+
+  runs.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  return runs;
+}
+
 async function getOpportunity(id) {
   const filePath = opportunityPath(id);
   if (!filePath) return null;
@@ -2474,6 +2637,16 @@ async function saveWorkflowRun(run) {
   return run;
 }
 
+async function saveAgentRouterRun(run) {
+  await ensureContentDirs();
+  const filePath = agentRouterRunPath(run.id);
+  if (!filePath) {
+    throw new Error("Invalid agent router run id");
+  }
+  await writeFile(filePath, agentRouterRunToMarkdown(run), "utf8");
+  return run;
+}
+
 const storage = {
   listOpportunities,
   listInterviews,
@@ -2491,6 +2664,7 @@ const storage = {
   listAiFrontierCards,
   listRhythmLogs,
   listWorkflowRuns,
+  listAgentRouterRuns,
   getOpportunity,
   getInterview,
   getBrief,
@@ -2522,6 +2696,7 @@ const storage = {
   saveAiFrontierCard,
   saveRhythmLog,
   saveWorkflowRun,
+  saveAgentRouterRun,
 };
 
 function ruleDateBucket(value) {
@@ -4854,6 +5029,24 @@ async function handleApi(req, res, url) {
   if (url.pathname === "/api/public-portfolio") {
     if (req.method === "GET") {
       return sendJson(res, 200, await publicPortfolioData());
+    }
+
+    return methodNotAllowed(res);
+  }
+
+  if (url.pathname === "/api/agent-router-runs") {
+    if (req.method === "GET") {
+      const agentRouterRuns = await storage.listAgentRouterRuns();
+      return sendJson(res, 200, { agentRouterRuns });
+    }
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const [reviews, interviews] = await Promise.all([listReviews(), listInterviews()]);
+      const route = classifyAgentIntent(body.intentText, { reviews, interviews });
+      const agentRouterRun = normalizeAgentRouterRun({ intentText: body.intentText, route }, {}, { reviews, interviews });
+      await storage.saveAgentRouterRun(agentRouterRun);
+      return sendJson(res, 201, { agentRouterRun });
     }
 
     return methodNotAllowed(res);

@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.30";
+const APP_VERSION = "v0.31";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -610,6 +610,8 @@ const state = {
   aiAnalysisNotes: [],
   workflowRuns: [],
   aiRuntimeStatus: null,
+  agentRouterRuns: [],
+  agentRouterIntent: "",
   workflowRuntimeById: {},
   workflowRuntimeDecisions: {},
   preparationRuntimeByInterviewId: {},
@@ -677,6 +679,7 @@ const state = {
   loadingPreparationRuntimeId: null,
   startingPreparationRuntime: false,
   resumingPreparationRuntime: false,
+  routingAgent: false,
   runningAiDiagnosis: false,
   parsingAiCandidates: false,
   actingAiCandidateId: null,
@@ -773,6 +776,7 @@ async function loadData() {
       aiAnalysisNotesPayload,
       workflowRunsPayload,
       aiRuntimeStatusPayload,
+      agentRouterRunsPayload,
       aiFrontierCardsPayload,
       rhythmLogsPayload,
       systemSnapshotPayload,
@@ -792,6 +796,7 @@ async function loadData() {
       api("/api/ai-analysis-notes"),
       api("/api/workflow-runs"),
       api("/api/ai-runtime-status").catch(() => null),
+      api("/api/agent-router-runs").catch(() => ({ agentRouterRuns: [] })),
       api("/api/ai-frontier-cards"),
       api("/api/rhythm-logs"),
       api("/api/system-snapshot").catch(() => null),
@@ -811,6 +816,7 @@ async function loadData() {
     state.aiAnalysisNotes = aiAnalysisNotesPayload.aiAnalysisNotes || [];
     state.workflowRuns = workflowRunsPayload.workflowRuns || [];
     state.aiRuntimeStatus = aiRuntimeStatusPayload?.aiRuntime || null;
+    state.agentRouterRuns = agentRouterRunsPayload.agentRouterRuns || [];
     state.aiFrontierCards = aiFrontierCardsPayload.aiFrontierCards || [];
     state.rhythmLogs = rhythmLogsPayload.rhythmLogs || [];
     state.systemSnapshot = systemSnapshotPayload?.snapshot || null;
@@ -2001,6 +2007,34 @@ async function resumeSelectedPreparationRuntime() {
     showError(error.message);
   } finally {
     state.resumingPreparationRuntime = false;
+    render();
+  }
+}
+
+async function submitAgentRouterRun(event) {
+  event.preventDefault();
+  if (state.routingAgent) return;
+  const formData = new FormData(event.currentTarget);
+  const intentText = String(formData.get("intentText") || "").trim();
+  if (!intentText) {
+    showInfo("先写一句你想让总 Agent 判断的目标");
+    return;
+  }
+  state.routingAgent = true;
+  render();
+  try {
+    const result = await api("/api/agent-router-runs", {
+      method: "POST",
+      body: JSON.stringify({ intentText }),
+    });
+    const list = await api("/api/agent-router-runs");
+    state.agentRouterRuns = list.agentRouterRuns || [result.agentRouterRun];
+    state.agentRouterIntent = "";
+    showToast("总 Agent 已记录路由建议");
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    state.routingAgent = false;
     render();
   }
 }
@@ -3579,6 +3613,10 @@ function attachCommonEvents() {
     state.globalSearchQuery = "";
     state.globalSearchFilter = "all";
     render();
+  });
+  document.querySelector("#agent-router-form")?.addEventListener("submit", submitAgentRouterRun);
+  document.querySelector("#agent-router-intent")?.addEventListener("input", (event) => {
+    state.agentRouterIntent = event.target.value;
   });
   document.querySelectorAll("[data-training-plan-view]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -6035,6 +6073,84 @@ function renderAgentFlow(title, steps) {
   `;
 }
 
+function agentNameLabel(value) {
+  const labels = {
+    review_specialist: "Review Specialist",
+    preparation_specialist: "Preparation Specialist",
+    manual: "人工分流",
+  };
+  return labels[value] || value || "未知";
+}
+
+function confidenceLabel(value) {
+  const labels = { high: "高", medium: "中", low: "低" };
+  return labels[value] || value || "低";
+}
+
+function routeTypeLabel(value) {
+  const labels = {
+    review_diagnosis: "面试后复盘诊断",
+    interview_preparation: "面试前准备",
+    portfolio_publish: "作品集公开",
+    manual_triage: "人工判断",
+    clarify_intent: "补充目标",
+  };
+  return labels[value] || value || "未分类";
+}
+
+function renderAgentRouterPanel() {
+  const recentRuns = state.agentRouterRuns.slice(0, 5);
+  return `
+    <section class="panel agent-router-panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">总 Agent 路由器</h2>
+          <p class="panel-subtitle">输入当前目标，系统只生成路由建议和记录，不会自动启动子 Agent 或写入业务结果。</p>
+        </div>
+      </div>
+      <div class="panel-body agent-router-body">
+        <form id="agent-router-form" class="agent-router-form">
+          <label for="agent-router-intent">我现在想做什么</label>
+          <textarea id="agent-router-intent" name="intentText" placeholder="例如：我想复盘刚才的一面，找出挂点并生成训练任务。">${escapeHtml(state.agentRouterIntent)}</textarea>
+          <div class="actions candidate-actions">
+            <button class="btn primary" type="submit"${disabledAttr(state.routingAgent)}>${state.routingAgent ? "判断中..." : "生成并记录路由建议"}</button>
+          </div>
+        </form>
+        <div class="agent-route-list">
+          ${
+            recentRuns.length
+              ? recentRuns
+                  .map(
+                    (run) => `
+                      <article class="agent-route-card">
+                        <div class="agent-card-header">
+                          <div>
+                            <p class="eyebrow">${escapeHtml(routeTypeLabel(run.routeType))}</p>
+                            <h3>${escapeHtml(agentNameLabel(run.selectedAgent))}</h3>
+                          </div>
+                          <span class="tag candidate-pending">置信度 ${escapeHtml(confidenceLabel(run.confidence))}</span>
+                        </div>
+                        <p class="agent-purpose">${escapeHtml(run.intentText)}</p>
+                        <p class="mini-meta">${escapeHtml(run.reason)}</p>
+                        <div class="agent-stat-row">
+                          ${(run.prerequisites || []).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+                        </div>
+                        <p class="mini-meta">${escapeHtml(run.nextStep)}</p>
+                        <div class="actions candidate-actions">
+                          <button class="btn primary" data-module-shortcut="${escapeHtml(run.targetModule || "agentRuntime")}" type="button">${escapeHtml(run.actionLabel || "打开建议模块")}</button>
+                        </div>
+                      </article>
+                    `,
+                  )
+                  .join("")
+              : `<div class="empty">还没有路由记录。输入一句目标，总 Agent 会给出推荐路径。</div>`
+          }
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderAgentRuntime() {
   const aiRuntime = state.aiRuntimeStatus;
   const aiReady = Boolean(aiRuntime?.configured);
@@ -6088,6 +6204,7 @@ function renderAgentRuntime() {
 
   return `
     ${renderTopbar("Agent 总控台", "把已接入的受控 Agent、模型配置、启动入口和人工审批边界放在一个地方。", "AG Agent Runtime Hub")}
+    ${renderAgentRouterPanel()}
     <section class="grid metrics compact-metrics">
       <div class="metric"><div class="metric-label">模型配置</div><div class="metric-value small">${configuredLabel}</div></div>
       <div class="metric"><div class="metric-label">已接入 Agent</div><div class="metric-value">2</div></div>

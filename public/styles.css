@@ -1242,6 +1242,48 @@ textarea:focus {
   margin-bottom: 16px;
 }
 
+.agent-router-panel {
+  margin-bottom: 16px;
+}
+
+.agent-router-body {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.38fr) minmax(0, 0.62fr);
+  gap: 14px;
+}
+
+.agent-router-form,
+.agent-route-list,
+.agent-route-card {
+  display: grid;
+  gap: 10px;
+}
+
+.agent-router-form {
+  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: #fbfaf5;
+}
+
+.agent-router-form label {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.agent-router-form textarea {
+  min-height: 132px;
+  resize: vertical;
+}
+
+.agent-route-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--surface);
+}
+
 .agent-config-grid,
 .agent-card-grid,
 .agent-flow-grid {
@@ -2092,6 +2134,7 @@ textarea:focus {
   .weakness-profile-grid,
   .war-room-grid,
   .answer-stats,
+  .agent-router-body,
   .agent-config-grid,
   .agent-card-grid,
   .agent-flow-grid,
