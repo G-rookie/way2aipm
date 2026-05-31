@@ -1,4 +1,4 @@
-const APP_VERSION = "v0.29";
+const APP_VERSION = "v0.30";
 
 const STAGES = [
   ["collected", "已收集"],
@@ -298,6 +298,7 @@ const RHYTHM_STATUSES = [
 
 const MODULES = [
   ["dashboard", "总控调度器", "00"],
+  ["agentRuntime", "Agent 总控", "AG"],
   ["workflow", "流程运行", "WF"],
   ["pipeline", "求职中台", "01"],
   ["preInterview", "面试前作战室", "02"],
@@ -608,6 +609,7 @@ const state = {
   portfolioPreviewMode: false,
   aiAnalysisNotes: [],
   workflowRuns: [],
+  aiRuntimeStatus: null,
   workflowRuntimeById: {},
   workflowRuntimeDecisions: {},
   preparationRuntimeByInterviewId: {},
@@ -770,6 +772,7 @@ async function loadData() {
       portfolioProjectsPayload,
       aiAnalysisNotesPayload,
       workflowRunsPayload,
+      aiRuntimeStatusPayload,
       aiFrontierCardsPayload,
       rhythmLogsPayload,
       systemSnapshotPayload,
@@ -788,6 +791,7 @@ async function loadData() {
       api("/api/portfolio-projects"),
       api("/api/ai-analysis-notes"),
       api("/api/workflow-runs"),
+      api("/api/ai-runtime-status").catch(() => null),
       api("/api/ai-frontier-cards"),
       api("/api/rhythm-logs"),
       api("/api/system-snapshot").catch(() => null),
@@ -806,6 +810,7 @@ async function loadData() {
     state.portfolioProjects = portfolioProjectsPayload.portfolioProjects || [];
     state.aiAnalysisNotes = aiAnalysisNotesPayload.aiAnalysisNotes || [];
     state.workflowRuns = workflowRunsPayload.workflowRuns || [];
+    state.aiRuntimeStatus = aiRuntimeStatusPayload?.aiRuntime || null;
     state.aiFrontierCards = aiFrontierCardsPayload.aiFrontierCards || [];
     state.rhythmLogs = rhythmLogsPayload.rhythmLogs || [];
     state.systemSnapshot = systemSnapshotPayload?.snapshot || null;
@@ -5939,6 +5944,197 @@ function renderWorkflowRuntime(run) {
   `;
 }
 
+function agentRuntimeStatusLabel(status) {
+  const labels = {
+    ready: "可启动",
+    missing_data: "缺少数据",
+    waiting_approval: "等待审批",
+    completed: "已有完成记录",
+    needs_config: "需要模型配置",
+  };
+  return labels[status] || status;
+}
+
+function agentRuntimeStatusClass(status) {
+  const classes = {
+    ready: "candidate-accepted",
+    missing_data: "candidate-pending",
+    waiting_approval: "workflow-candidate_confirmation",
+    completed: "workflow-completed",
+    needs_config: "workflow-paused",
+  };
+  return classes[status] || "candidate-pending";
+}
+
+function reviewAgentStatus(aiReady) {
+  if (!aiReady) return "needs_config";
+  if (!state.reviews.length) return "missing_data";
+  if (state.workflowRuns.some((item) => item.status === "candidate_confirmation")) return "waiting_approval";
+  if (state.workflowRuns.some((item) => item.status === "completed")) return "completed";
+  return "ready";
+}
+
+function preparationAgentStatus(aiReady) {
+  if (!aiReady) return "needs_config";
+  if (!state.interviews.length) return "missing_data";
+  if (Object.values(state.preparationRuntimeByInterviewId).some((runtime) => runtime?.status === "waiting_for_approval")) {
+    return "waiting_approval";
+  }
+  if (state.briefs.length) return "completed";
+  return "ready";
+}
+
+function renderAgentRuntimeCard(agent) {
+  return `
+    <article class="agent-card">
+      <div class="agent-card-header">
+        <div>
+          <p class="eyebrow">${escapeHtml(agent.eyebrow)}</p>
+          <h2>${escapeHtml(agent.name)}</h2>
+        </div>
+        <span class="tag ${agentRuntimeStatusClass(agent.status)}">${agentRuntimeStatusLabel(agent.status)}</span>
+      </div>
+      <p class="agent-purpose">${escapeHtml(agent.purpose)}</p>
+      <div class="agent-io-grid">
+        <div>
+          <strong>输入</strong>
+          <p>${escapeHtml(agent.input)}</p>
+        </div>
+        <div>
+          <strong>输出</strong>
+          <p>${escapeHtml(agent.output)}</p>
+        </div>
+        <div>
+          <strong>写入边界</strong>
+          <p>${escapeHtml(agent.writeBoundary)}</p>
+        </div>
+      </div>
+      <div class="agent-stat-row">
+        ${agent.stats.map(([label, value]) => `<span>${escapeHtml(label)}：<strong>${escapeHtml(value)}</strong></span>`).join("")}
+      </div>
+      <div class="actions candidate-actions">
+        ${agent.actions
+          .map(
+            (action) =>
+              `<button class="btn ${action.primary ? "primary" : ""}" data-module-shortcut="${escapeHtml(action.module)}" type="button">${escapeHtml(action.label)}</button>`,
+          )
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderAgentFlow(title, steps) {
+  return `
+    <div class="agent-flow">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="agent-flow-steps">
+        ${steps.map((step, index) => `<span>${index ? "<b>→</b>" : ""}${escapeHtml(step)}</span>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderAgentRuntime() {
+  const aiRuntime = state.aiRuntimeStatus;
+  const aiReady = Boolean(aiRuntime?.configured);
+  const waitingWorkflowApprovals = state.workflowRuns.filter((item) => item.status === "candidate_confirmation").length;
+  const loadedPreparationApprovals = Object.values(state.preparationRuntimeByInterviewId).filter(
+    (runtime) => runtime?.status === "waiting_for_approval",
+  ).length;
+  const reviewStatus = reviewAgentStatus(aiReady);
+  const preparationStatus = preparationAgentStatus(aiReady);
+  const readyAgents = [reviewStatus, preparationStatus].filter((status) => status === "ready").length;
+  const configuredLabel = aiReady ? "已配置" : "未配置";
+
+  const agents = [
+    {
+      eyebrow: "Review Specialist",
+      name: "面试后复盘诊断 Agent",
+      status: reviewStatus,
+      purpose: "从已保存的面试复盘中生成能力缺陷与训练任务候选，帮助把失败点进入修复闭环。",
+      input: "InterviewReview、Opportunity、InterviewRound、已有 WorkflowRun",
+      output: "AI 诊断摘要、缺陷候选、训练任务候选",
+      writeBoundary: "生成候选后暂停；只有逐条审批采纳后才写入能力缺陷与训练任务。",
+      stats: [
+        ["复盘记录", String(state.reviews.length)],
+        ["修复流程", String(state.workflowRuns.length)],
+        ["待审批", String(waitingWorkflowApprovals)],
+      ],
+      actions: [
+        { label: state.workflowRuns.length ? "打开流程运行" : "去复盘室开启流程", module: state.workflowRuns.length ? "workflow" : "postInterview", primary: true },
+        { label: "查看 AI 工作台", module: "aiAnalysis", primary: false },
+      ],
+    },
+    {
+      eyebrow: "Preparation Specialist",
+      name: "面试前 Brief 建议 Agent",
+      status: preparationStatus,
+      purpose: "根据岗位、面试轮次与可用项目弹药生成 Brief 字段建议，帮助快速进入面试准备。",
+      input: "Opportunity、InterviewRound、状态为可用于面试的 ProjectAmmo",
+      output: "JD 拆解、隐性期待、项目映射、问题预测、准备清单",
+      writeBoundary: "生成建议后暂停；只有逐项选择采纳后才创建或更新 PreInterviewBrief。",
+      stats: [
+        ["面试轮次", String(state.interviews.length)],
+        ["Brief", String(state.briefs.length)],
+        ["已载入审批", String(loadedPreparationApprovals)],
+      ],
+      actions: [
+        { label: state.interviews.length ? "去面试前作战室" : "去求职中台补面试", module: state.interviews.length ? "preInterview" : "pipeline", primary: true },
+        { label: "查看项目弹药", module: "projectAmmo", primary: false },
+      ],
+    },
+  ];
+
+  return `
+    ${renderTopbar("Agent 总控台", "把已接入的受控 Agent、模型配置、启动入口和人工审批边界放在一个地方。", "AG Agent Runtime Hub")}
+    <section class="grid metrics compact-metrics">
+      <div class="metric"><div class="metric-label">模型配置</div><div class="metric-value small">${configuredLabel}</div></div>
+      <div class="metric"><div class="metric-label">已接入 Agent</div><div class="metric-value">2</div></div>
+      <div class="metric"><div class="metric-label">可直接启动</div><div class="metric-value">${readyAgents}</div></div>
+      <div class="metric"><div class="metric-label">等待审批</div><div class="metric-value">${waitingWorkflowApprovals + loadedPreparationApprovals}</div></div>
+    </section>
+    <section class="panel agent-runtime-panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">AI Runtime 配置</h2>
+          <p class="panel-subtitle">只检查本地服务端配置是否存在，不展示 API Key，也不会主动调用模型消耗 token。</p>
+        </div>
+        <span class="tag ${aiReady ? "candidate-accepted" : "workflow-paused"}">${configuredLabel}</span>
+      </div>
+      <div class="panel-body agent-config-grid">
+        <div class="workflow-block">
+          <h3>OpenAI Responses</h3>
+          <p class="mini-meta">API Key：${aiRuntime?.apiKeyConfigured ? "已配置" : "未配置"} · Model：${aiRuntime?.modelConfigured ? "已配置" : "未配置"} · Endpoint：${aiRuntime?.customResponsesUrlConfigured ? "自定义" : "默认"}</p>
+        </div>
+        <div class="workflow-block">
+          <h3>本地配置方式</h3>
+          <p class="mini-meta">在项目根目录 .env.local 中配置 OPENAI_API_KEY 与 OPENAI_MODEL，然后重启 node server.mjs。</p>
+        </div>
+        <div class="workflow-block">
+          <h3>运行边界</h3>
+          <p class="mini-meta">当前是受控 Agent + 人工审批 Workflow，不是完全自主 Agent；所有业务写入都发生在确认之后。</p>
+        </div>
+      </div>
+    </section>
+    <section class="agent-card-grid">
+      ${agents.map(renderAgentRuntimeCard).join("")}
+    </section>
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">当前真实编排</h2>
+          <p class="panel-subtitle">这两条链路是现在可以试用的 Agent 能力；后续总 Agent 自动路由会基于这些稳定入口扩展。</p>
+        </div>
+      </div>
+      <div class="panel-body agent-flow-grid">
+        ${renderAgentFlow("面试后修复链路", ["Review", "WorkflowRun", "LangGraph Runtime", "人工审批", "缺陷 / 训练任务"])}
+        ${renderAgentFlow("面试前准备链路", ["InterviewRound", "Preparation Runtime", "人工审批", "PreInterviewBrief"])}
+      </div>
+    </section>
+  `;
+}
+
 function renderWorkflow() {
   const run = selectedWorkflowRun();
   const active = state.workflowRuns.filter((item) => !["completed", "paused"].includes(item.status)).length;
@@ -8198,6 +8394,7 @@ function renderExpressionSessionForm(drill) {
 function render() {
   let content;
   if (state.activeModule === "dashboard") content = renderDashboard();
+  if (state.activeModule === "agentRuntime") content = renderAgentRuntime();
   if (state.activeModule === "globalSearch") content = renderGlobalSearch();
   if (state.activeModule === "pipeline") content = renderPipeline();
   if (state.activeModule === "preInterview") content = renderPreInterview();

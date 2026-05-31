@@ -308,6 +308,25 @@ function methodNotAllowed(res) {
   sendJson(res, 405, { error: "Method not allowed" });
 }
 
+function aiRuntimeStatus() {
+  const apiKeyConfigured = Boolean(String(process.env.OPENAI_API_KEY || "").trim());
+  const modelConfigured = Boolean(String(process.env.OPENAI_MODEL || "").trim());
+  const customResponsesUrlConfigured = OPENAI_RESPONSES_URL !== "https://api.openai.com/v1/responses";
+  return {
+    provider: "openai",
+    configured: apiKeyConfigured && modelConfigured,
+    apiKeyConfigured,
+    modelConfigured,
+    customResponsesUrlConfigured,
+    langGraphCheckpointConfigured: Boolean(String(process.env.WAY2AIPM_LANGGRAPH_CHECKPOINT_PATH || "").trim()),
+    capabilities: {
+      reviewSpecialist: true,
+      preparationSpecialist: true,
+      automaticHealthCheck: false,
+    },
+  };
+}
+
 function agentToolRequestAuthorized(req, res) {
   const expected = String(process.env.WAY2AIPM_AGENT_TOOL_TOKEN || "").trim();
   if (!expected) {
@@ -4175,6 +4194,14 @@ async function readRequestBody(req) {
 }
 
 async function handleApi(req, res, url) {
+  if (url.pathname === "/api/ai-runtime-status") {
+    if (req.method === "GET") {
+      return sendJson(res, 200, { aiRuntime: aiRuntimeStatus() });
+    }
+
+    return methodNotAllowed(res);
+  }
+
   if (url.pathname === "/api/system-snapshot") {
     if (req.method === "GET") {
       return sendJson(res, 200, { snapshot: await systemSnapshot() });

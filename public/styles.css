@@ -1238,6 +1238,113 @@ textarea:focus {
   white-space: pre-wrap;
 }
 
+.agent-runtime-panel {
+  margin-bottom: 16px;
+}
+
+.agent-config-grid,
+.agent-card-grid,
+.agent-flow-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.agent-config-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.agent-card-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.agent-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.agent-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-card h2,
+.agent-flow h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.agent-purpose {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.agent-io-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.agent-io-grid div,
+.agent-flow {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: #fbfaf5;
+}
+
+.agent-io-grid strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.agent-io-grid p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.agent-stat-row,
+.agent-flow-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-stat-row span,
+.agent-flow-steps span {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 7px 9px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.agent-flow-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agent-flow {
+  display: grid;
+  gap: 12px;
+}
+
+.agent-flow-steps b {
+  margin-right: 8px;
+  color: var(--accent);
+}
+
 .relation-button {
   width: 100%;
   border: 1px solid var(--line);
@@ -1985,6 +2092,10 @@ textarea:focus {
   .weakness-profile-grid,
   .war-room-grid,
   .answer-stats,
+  .agent-config-grid,
+  .agent-card-grid,
+  .agent-flow-grid,
+  .agent-io-grid,
   .workflow-relations,
   .placeholder-grid,
   .portfolio-preview-grid {
